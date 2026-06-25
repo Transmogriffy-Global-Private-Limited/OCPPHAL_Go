@@ -12,6 +12,7 @@ import (
 
 	"github.com/Transmogriffy-Global-Private-Limited/OCPPHAL_Go/internal/config"
 	"github.com/Transmogriffy-Global-Private-Limited/OCPPHAL_Go/internal/ocpp"
+	"github.com/Transmogriffy-Global-Private-Limited/OCPPHAL_Go/internal/session"
 	"github.com/Transmogriffy-Global-Private-Limited/OCPPHAL_Go/internal/state"
 	"github.com/Transmogriffy-Global-Private-Limited/OCPPHAL_Go/internal/store"
 )
@@ -21,6 +22,7 @@ type Server struct {
 	logger   *slog.Logger
 	registry *state.Registry
 	store    store.TransactionStore
+	manager  *session.Manager
 	upgrader websocket.Upgrader
 }
 
@@ -30,6 +32,7 @@ func NewServer(cfg config.Config, logger *slog.Logger, registry *state.Registry,
 		logger:   logger,
 		registry: registry,
 		store:    transactionStore,
+		manager:  session.NewManager(registry, logger),
 		upgrader: websocket.Upgrader{
 			CheckOrigin:  func(r *http.Request) bool { return true },
 			Subprotocols: []string{"ocpp1.6", "ocpp1.6j"},
@@ -246,61 +249,36 @@ func (s *Server) chargerWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	s.logger.Info("charger connected", "charger_id", chargerID, "serial_number", serialNumber)
-	s.registry.Touch(chargerID)
-	defer s.registry.MarkOffline(chargerID)
-
-	for {
-		messageType, raw, err := conn.ReadMessage()
-		if err != nil {
-			s.logger.Info("charger disconnected", "charger_id", chargerID, "error", err)
-			return
-		}
-
-		s.registry.Touch(chargerID)
-
-		if messageType != websocket.TextMessage {
-			continue
-		}
-
-		call, err := ocpp.ParseCall(raw)
-		if err != nil {
-			s.logger.Warn("invalid OCPP frame", "charger_id", chargerID, "error", err)
-			continue
-		}
-
-		s.logger.Info("received OCPP call", "charger_id", chargerID, "action", call.Action, "unique_id", call.UniqueID)
-		s.handleOCPPCall(conn, chargerID, call)
-	}
+	s.manager.Handle(conn, chargerID, serialNumber, s.handleOCPPCall)
 }
 
-func (s *Server) handleOCPPCall(conn *websocket.Conn, chargerID string, call *ocpp.Call) {
+func (s *Server) handleOCPPCall(sess *session.Session, chargerID string, call *ocpp.Call) {
 	now := time.Now().UTC()
 
 	switch call.Action {
 	case "BootNotification":
-		s.writeCallResult(conn, call.UniqueID, map[string]any{
+		sess.WriteCallResult(call.UniqueID, map[string]any{
 			"currentTime": now.Format(time.RFC3339),
 			"interval":    900,
 			"status":      "Accepted",
 		})
 
 	case "Authorize":
-		s.writeCallResult(conn, call.UniqueID, map[string]any{
+		sess.WriteCallResult(call.UniqueID, map[string]any{
 			"idTagInfo": map[string]string{
 				"status": "Accepted",
 			},
 		})
 
 	case "Heartbeat":
-		s.writeCallResult(conn, call.UniqueID, map[string]string{
+		sess.WriteCallResult(call.UniqueID, map[string]string{
 			"currentTime": now.Format(time.RFC3339),
 		})
 
 	case "StartTransaction":
 		payload, err := ocpp.ParseStartTransactionPayload(call.Payload)
 		if err != nil {
-			s.writeCallError(conn, call.UniqueID, "FormationViolation", err.Error())
+			sess.WriteCallError(call.UniqueID, "FormationViolation", err.Error())
 			return
 		}
 
@@ -313,7 +291,7 @@ func (s *Server) handleOCPPCall(conn *websocket.Conn, chargerID string, call *oc
 		})
 		if err != nil {
 			s.logger.Error("failed to create transaction", "charger_id", chargerID, "error", err)
-			s.writeCallResult(conn, call.UniqueID, map[string]any{
+			sess.WriteCallResult(call.UniqueID, map[string]any{
 				"transactionId": 0,
 				"idTagInfo": map[string]string{
 					"status": "Rejected",
@@ -324,7 +302,7 @@ func (s *Server) handleOCPPCall(conn *websocket.Conn, chargerID string, call *oc
 
 		s.registry.ApplyStartTransaction(chargerID, payload.ConnectorID, tx.TransactionID, payload.MeterStart)
 
-		s.writeCallResult(conn, call.UniqueID, map[string]any{
+		sess.WriteCallResult(call.UniqueID, map[string]any{
 			"transactionId": tx.TransactionID,
 			"idTagInfo": map[string]string{
 				"status": "Accepted",
@@ -334,7 +312,7 @@ func (s *Server) handleOCPPCall(conn *websocket.Conn, chargerID string, call *oc
 	case "StopTransaction":
 		payload, err := ocpp.ParseStopTransactionPayload(call.Payload)
 		if err != nil {
-			s.writeCallError(conn, call.UniqueID, "FormationViolation", err.Error())
+			sess.WriteCallError(call.UniqueID, "FormationViolation", err.Error())
 			return
 		}
 
@@ -347,7 +325,7 @@ func (s *Server) handleOCPPCall(conn *websocket.Conn, chargerID string, call *oc
 
 		if connectorID == 0 {
 			s.logger.Error("failed to resolve connector for StopTransaction", "charger_id", chargerID, "transaction_id", payload.TransactionID)
-			s.writeCallResult(conn, call.UniqueID, map[string]any{
+			sess.WriteCallResult(call.UniqueID, map[string]any{
 				"idTagInfo": map[string]string{
 					"status": "Rejected",
 				},
@@ -365,7 +343,7 @@ func (s *Server) handleOCPPCall(conn *websocket.Conn, chargerID string, call *oc
 
 		s.registry.ApplyStopTransaction(chargerID, connectorID, payload.MeterStop)
 
-		s.writeCallResult(conn, call.UniqueID, map[string]any{
+		sess.WriteCallResult(call.UniqueID, map[string]any{
 			"idTagInfo": map[string]string{
 				"status": "Accepted",
 			},
@@ -374,7 +352,7 @@ func (s *Server) handleOCPPCall(conn *websocket.Conn, chargerID string, call *oc
 	case "StatusNotification":
 		payload, err := ocpp.ParseStatusNotificationPayload(call.Payload)
 		if err != nil {
-			s.writeCallError(conn, call.UniqueID, "FormationViolation", err.Error())
+			sess.WriteCallError(call.UniqueID, "FormationViolation", err.Error())
 			return
 		}
 
@@ -386,12 +364,12 @@ func (s *Server) handleOCPPCall(conn *websocket.Conn, chargerID string, call *oc
 			payload.TransactionID,
 		)
 
-		s.writeCallResult(conn, call.UniqueID, map[string]any{})
+		sess.WriteCallResult(call.UniqueID, map[string]any{})
 
 	case "MeterValues":
 		payload, err := ocpp.ParseMeterValuesPayload(call.Payload)
 		if err != nil {
-			s.writeCallError(conn, call.UniqueID, "FormationViolation", err.Error())
+			sess.WriteCallError(call.UniqueID, "FormationViolation", err.Error())
 			return
 		}
 
@@ -414,40 +392,16 @@ func (s *Server) handleOCPPCall(conn *websocket.Conn, chargerID string, call *oc
 			}
 		}
 
-		s.writeCallResult(conn, call.UniqueID, map[string]any{})
+		sess.WriteCallResult(call.UniqueID, map[string]any{})
 
 	case "DiagnosticsStatusNotification":
-		s.writeCallResult(conn, call.UniqueID, map[string]any{})
+		sess.WriteCallResult(call.UniqueID, map[string]any{})
 
 	case "FirmwareStatusNotification":
-		s.writeCallResult(conn, call.UniqueID, map[string]any{})
+		sess.WriteCallResult(call.UniqueID, map[string]any{})
 
 	default:
-		s.writeCallError(conn, call.UniqueID, "NotImplemented", "Go OCPP core scaffolded, action not implemented yet")
-	}
-}
-
-func (s *Server) writeCallResult(conn *websocket.Conn, uniqueID string, payload any) {
-	resp, err := ocpp.CallResult(uniqueID, payload)
-	if err != nil {
-		s.logger.Error("failed to encode OCPP CallResult", "unique_id", uniqueID, "error", err)
-		return
-	}
-
-	if err := conn.WriteMessage(websocket.TextMessage, resp); err != nil {
-		s.logger.Warn("failed to write OCPP CallResult", "unique_id", uniqueID, "error", err)
-	}
-}
-
-func (s *Server) writeCallError(conn *websocket.Conn, uniqueID string, code string, description string) {
-	resp, err := ocpp.CallError(uniqueID, code, description, map[string]any{})
-	if err != nil {
-		s.logger.Error("failed to encode OCPP CallError", "unique_id", uniqueID, "error", err)
-		return
-	}
-
-	if err := conn.WriteMessage(websocket.TextMessage, resp); err != nil {
-		s.logger.Warn("failed to write OCPP CallError", "unique_id", uniqueID, "error", err)
+		sess.WriteCallError(call.UniqueID, "NotImplemented", "Go OCPP core scaffolded, action not implemented yet")
 	}
 }
 
