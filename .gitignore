@@ -1,0 +1,44 @@
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Built binaries
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go build/test artifacts
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Go workspace/vendor noise
+go.work
+go.work.sum
+vendor/
+
+# Logs
+*.log
+logs/
+
+# Local DB / scratch
+*.db
+*.sqlite
+*.sqlite3
+tmp/
+temp/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+
+# PowerShell local scratch
+*.ps1.bak
