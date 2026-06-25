@@ -12,6 +12,8 @@ import (
 
 	ocpp16 "github.com/lorenzodonini/ocpp-go/ocpp1.6"
 	"github.com/lorenzodonini/ocpp-go/ocpp1.6/core"
+	"github.com/lorenzodonini/ocpp-go/ocpp1.6/firmware"
+	"github.com/lorenzodonini/ocpp-go/ocpp1.6/remotetrigger"
 	"github.com/lorenzodonini/ocpp-go/ocpp1.6/types"
 )
 
@@ -83,8 +85,27 @@ func (h *smokeHandler) OnUnlockConnector(request *core.UnlockConnectorRequest) (
 	return core.NewUnlockConnectorConfirmation(core.UnlockStatusUnlocked), nil
 }
 
+func (h *smokeHandler) OnGetDiagnostics(request *firmware.GetDiagnosticsRequest) (*firmware.GetDiagnosticsConfirmation, error) {
+	fmt.Println("ChargePoint received GetDiagnostics:", request.Location)
+
+	conf := firmware.NewGetDiagnosticsConfirmation()
+	conf.FileName = "diagnostics-smoke.log"
+
+	return conf, nil
+}
+
+func (h *smokeHandler) OnUpdateFirmware(request *firmware.UpdateFirmwareRequest) (*firmware.UpdateFirmwareConfirmation, error) {
+	fmt.Println("ChargePoint received UpdateFirmware:", request.Location)
+	return firmware.NewUpdateFirmwareConfirmation(), nil
+}
+
+func (h *smokeHandler) OnTriggerMessage(request *remotetrigger.TriggerMessageRequest) (*remotetrigger.TriggerMessageConfirmation, error) {
+	fmt.Println("ChargePoint received TriggerMessage:", request.RequestedMessage)
+	return remotetrigger.NewTriggerMessageConfirmation(remotetrigger.TriggerMessageStatusAccepted), nil
+}
+
 func main() {
-	clientID := env("CLIENT_ID", "CP-REST-CORE-001")
+	clientID := env("CLIENT_ID", "CP-FW-TRIGGER-001")
 	centralSystemURL := env("CENTRAL_SYSTEM_URL", "ws://127.0.0.1:18081")
 	restBaseURL := env("REST_BASE_URL", "http://127.0.0.1:18080")
 	apiKey := env("API_KEY", "testkey")
@@ -92,6 +113,8 @@ func main() {
 	handler := newSmokeHandler()
 	cp := ocpp16.NewChargePoint(clientID, nil, nil)
 	cp.SetCoreHandler(handler)
+	cp.SetFirmwareManagementHandler(handler)
+	cp.SetRemoteTriggerHandler(handler)
 
 	if err := cp.Start(centralSystemURL); err != nil {
 		log.Fatalf("connect charge point: %v", err)
@@ -169,6 +192,34 @@ func main() {
 		},
 	))
 
+	fmt.Println("REST /api/get_diagnostics:", postJSON(
+		restBaseURL+"/api/get_diagnostics",
+		apiKey,
+		map[string]any{
+			"uid":      clientID,
+			"location": "https://example.com/diagnostics",
+		},
+	))
+
+	fmt.Println("REST /api/update_firmware:", postJSON(
+		restBaseURL+"/api/update_firmware",
+		apiKey,
+		map[string]any{
+			"uid":           clientID,
+			"location":      "https://example.com/firmware.bin",
+			"retrieve_date": time.Now().UTC().Add(1 * time.Minute).Format(time.RFC3339),
+		},
+	))
+
+	fmt.Println("REST /api/trigger_message:", postJSON(
+		restBaseURL+"/api/trigger_message",
+		apiKey,
+		map[string]any{
+			"uid":               clientID,
+			"requested_message": "Heartbeat",
+		},
+	))
+
 	remoteStartStatus := postJSON(
 		restBaseURL+"/api/start_transaction",
 		apiKey,
@@ -181,6 +232,7 @@ func main() {
 	fmt.Println("REST /api/start_transaction:", remoteStartStatus)
 
 	remoteStartReq := waitRemoteStart(handler.remoteStartCh, 5*time.Second)
+
 	connectorID := 1
 	if remoteStartReq.ConnectorId != nil && *remoteStartReq.ConnectorId > 0 {
 		connectorID = *remoteStartReq.ConnectorId
@@ -260,7 +312,7 @@ func main() {
 	}
 	fmt.Println("StatusNotification: Available after stop")
 
-	fmt.Println("REST core outbound smoke complete")
+	fmt.Println("firmware + trigger + transaction smoke complete")
 }
 
 func waitRemoteStart(ch <-chan *core.RemoteStartTransactionRequest, timeout time.Duration) *core.RemoteStartTransactionRequest {

@@ -51,10 +51,13 @@ func (s *Server) Routes() http.Handler {
 	} {
 		routePath := path
 		mux.HandleFunc(routePath, func(w http.ResponseWriter, r *http.Request) {
+			_ = routePath
+
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusOK)
 				return
 			}
+
 			s.requireAPIKey(http.HandlerFunc(s.api)).ServeHTTP(w, r)
 		})
 	}
@@ -75,6 +78,7 @@ func (s *Server) requireAPIKey(next http.Handler) http.Handler {
 			writeJSON(w, http.StatusForbidden, map[string]any{"detail": "Invalid API key"})
 			return
 		}
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -84,6 +88,7 @@ func (s *Server) hello(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
+
 	writeJSON(w, http.StatusOK, map[string]string{
 		"message": "Helloo, this is the OCPP HAL API. It is running fine.",
 	})
@@ -114,6 +119,12 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 		s.reset(w, r)
 	case "/api/get_configuration":
 		s.getConfiguration(w, r)
+	case "/api/get_diagnostics":
+		s.getDiagnostics(w, r)
+	case "/api/update_firmware":
+		s.updateFirmware(w, r)
+	case "/api/trigger_message":
+		s.triggerMessage(w, r)
 	default:
 		writeJSON(w, http.StatusNotImplemented, map[string]any{
 			"error": "route not implemented yet in ocpp-go rewrite",
@@ -157,12 +168,15 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	if req.UID == "all" || req.UID == "all_online" {
 		all := s.registry.SnapshotAll()
 		resp := make(map[string]any, len(all))
+
 		for chargerID, cp := range all {
 			if req.UID == "all_online" && !cp.Online {
 				continue
 			}
+
 			resp[chargerID] = statusPayload(cp)
 		}
+
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
@@ -533,6 +547,7 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "Invalid JSON"})
 		return false
 	}
+
 	return true
 }
 

@@ -59,6 +59,7 @@ func New(registry *state.Registry, txStore store.TransactionStore, logger *slog.
 	})
 
 	h.cs.SetCoreHandler(h)
+	h.cs.SetFirmwareManagementHandler(h)
 
 	return h
 }
