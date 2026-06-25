@@ -45,4 +45,5 @@ type TransactionStore interface {
 	UpdateLiveMeter(ctx context.Context, input UpdateLiveMeterInput) (*Transaction, error)
 	StopTransaction(ctx context.Context, input StopTransactionInput) (*Transaction, error)
 	GetByTransactionID(ctx context.Context, chargerID string, transactionID int64) (*Transaction, error)
+	ChargerAnalytics(ctx context.Context, input AnalyticsInput) (*AnalyticsOutput, error)
 }
