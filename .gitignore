@@ -3,42 +3,31 @@
 .env.*
 !.env.example
 
-# Built binaries
+# Build outputs
 bin/
 *.exe
 *.dll
 *.so
 *.dylib
 
-# Go build/test artifacts
+# Go test/build artifacts
 *.test
 *.out
 coverage.out
 coverage.html
 
-# Go workspace/vendor noise
-go.work
-go.work.sum
-vendor/
-
-# Logs
+# Local scratch
+tmp/
+temp/
 *.log
-logs/
-
-# Local DB / scratch
 *.db
 *.sqlite
 *.sqlite3
-tmp/
-temp/
 
-# OS / editor
+# OS/editor
 .DS_Store
 Thumbs.db
 .vscode/*
-!.vscode/extensions.json
 !.vscode/settings.json
+!.vscode/extensions.json
 .idea/
-
-# PowerShell local scratch
-*.ps1.bak

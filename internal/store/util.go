@@ -43,3 +43,5 @@ func DeltaWh(previous float64, current float64) float64 {
 
 	return current + (rollover - previous) + 1
 }
+
+func floatPtr(v float64) *float64 { return &v }

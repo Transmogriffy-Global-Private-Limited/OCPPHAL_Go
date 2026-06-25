@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgconn"
+	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/Transmogriffy-Global-Private-Limited/OCPPHAL_Go/internal/config"
@@ -46,19 +46,15 @@ func NewPostgresStore(cfg config.Config) (*PostgresStore, error) {
 }
 
 func postgresURL(cfg config.Config) string {
-	userInfo := url.UserPassword(cfg.DBUser, cfg.DBPassword)
-
 	u := url.URL{
 		Scheme: "postgres",
-		User:   userInfo,
+		User:   url.UserPassword(cfg.DBUser, cfg.DBPassword),
 		Host:   fmt.Sprintf("%s:%d", cfg.DBHost, cfg.DBPort),
 		Path:   cfg.DBName,
 	}
-
 	q := u.Query()
 	q.Set("sslmode", cfg.DBSSLMode)
 	u.RawQuery = q.Encode()
-
 	return u.String()
 }
 
@@ -132,7 +128,6 @@ func (s *PostgresStore) UpdateLiveMeter(ctx context.Context, input UpdateLiveMet
 
 	tx.MeterStop = &input.MeterStop
 	tx.TotalConsumption = &total
-
 	return tx, nil
 }
 
@@ -163,7 +158,6 @@ func (s *PostgresStore) StopTransaction(ctx context.Context, input StopTransacti
 	tx.MeterStop = &input.MeterStop
 	tx.TotalConsumption = &total
 	tx.StopTime = &stopTime
-
 	return tx, nil
 }
 

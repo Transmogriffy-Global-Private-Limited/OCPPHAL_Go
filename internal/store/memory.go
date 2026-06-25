@@ -44,7 +44,6 @@ func (s *MemoryStore) CreateTransaction(ctx context.Context, input CreateTransac
 
 		s.nextRowID++
 		s.transactions[tid] = tx
-
 		return cloneTransaction(tx), nil
 	}
 
@@ -63,7 +62,6 @@ func (s *MemoryStore) UpdateLiveMeter(ctx context.Context, input UpdateLiveMeter
 	tx.MeterStop = floatPtr(input.MeterStop)
 	total := DeltaWh(tx.MeterStart, input.MeterStop) / 1000.0
 	tx.TotalConsumption = floatPtr(total)
-
 	return cloneTransaction(tx), nil
 }
 
@@ -81,7 +79,6 @@ func (s *MemoryStore) StopTransaction(ctx context.Context, input StopTransaction
 	total := DeltaWh(tx.MeterStart, input.MeterStop) / 1000.0
 	tx.TotalConsumption = floatPtr(total)
 	tx.StopTime = &now
-
 	return cloneTransaction(tx), nil
 }
 
@@ -93,7 +90,6 @@ func (s *MemoryStore) GetByTransactionID(ctx context.Context, chargerID string, 
 	if tx == nil || tx.ChargerID != chargerID {
 		return nil, errors.New("transaction not found")
 	}
-
 	return cloneTransaction(tx), nil
 }
 
@@ -105,23 +101,17 @@ func cloneTransaction(tx *Transaction) *Transaction {
 	copyTx := *tx
 
 	if tx.MeterStop != nil {
-		value := *tx.MeterStop
-		copyTx.MeterStop = &value
+		v := *tx.MeterStop
+		copyTx.MeterStop = &v
 	}
-
 	if tx.TotalConsumption != nil {
-		value := *tx.TotalConsumption
-		copyTx.TotalConsumption = &value
+		v := *tx.TotalConsumption
+		copyTx.TotalConsumption = &v
 	}
-
 	if tx.StopTime != nil {
-		value := *tx.StopTime
-		copyTx.StopTime = &value
+		v := *tx.StopTime
+		copyTx.StopTime = &v
 	}
 
 	return &copyTx
-}
-
-func floatPtr(value float64) *float64 {
-	return &value
 }

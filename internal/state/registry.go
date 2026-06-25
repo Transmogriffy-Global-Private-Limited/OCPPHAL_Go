@@ -30,95 +30,33 @@ type Registry struct {
 }
 
 func NewRegistry() *Registry {
-	return &Registry{
-		chargers: make(map[string]*ChargerState),
-	}
+	return &Registry{chargers: make(map[string]*ChargerState)}
 }
 
-func (r *Registry) Touch(chargerID string) *ChargerState {
+func (r *Registry) Touch(chargerID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	cp := r.ensureChargerLocked(chargerID)
+	cp := r.ensureLocked(chargerID)
 	cp.Online = true
 	cp.LastMessageTime = time.Now().UTC()
-
-	return cloneChargerState(cp)
 }
 
 func (r *Registry) MarkOffline(chargerID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	cp := r.chargers[chargerID]
-	if cp != nil {
+	if cp := r.chargers[chargerID]; cp != nil {
 		cp.Online = false
 		cp.LastMessageTime = time.Now().UTC()
 	}
 }
 
-func (r *Registry) ApplyStartTransaction(chargerID string, connectorID int, transactionID int64, meterStart float64) {
+func (r *Registry) ApplyStatusNotification(chargerID string, connectorID int, status string, errorCode string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	cp := r.ensureChargerLocked(chargerID)
-	cp.Online = true
-	cp.Status = "Active"
-	cp.LastMessageTime = time.Now().UTC()
-
-	key := connectorKey(connectorID)
-	conn := cp.Connectors[key]
-	if conn.ErrorCode == "" {
-		conn.ErrorCode = "NoError"
-	}
-
-	conn.Status = "Charging"
-	meterCopy := meterStart
-	txCopy := transactionID
-	conn.LastMeterValue = &meterCopy
-	conn.TransactionID = &txCopy
-
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	conn.LastMeterReceived = &now
-
-	cp.Connectors[key] = conn
-}
-
-func (r *Registry) ApplyStopTransaction(chargerID string, connectorID int, meterStop float64) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	cp := r.ensureChargerLocked(chargerID)
-	cp.Online = true
-	cp.Status = "Inactive"
-	cp.LastMessageTime = time.Now().UTC()
-
-	key := connectorKey(connectorID)
-	conn := cp.Connectors[key]
-	if conn.ErrorCode == "" {
-		conn.ErrorCode = "NoError"
-	}
-
-	if conn.LastMeterValue != nil {
-		conn.LastTransactionConsumptionKWh = deltaWh(*conn.LastMeterValue, meterStop) / 1000.0
-	}
-
-	conn.Status = "Available"
-	meterCopy := meterStop
-	conn.LastMeterValue = &meterCopy
-	conn.TransactionID = nil
-
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	conn.LastMeterReceived = &now
-
-	cp.Connectors[key] = conn
-}
-
-func (r *Registry) ApplyStatusNotification(chargerID string, connectorID int, status string, errorCode string, transactionID *int64) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	cp := r.ensureChargerLocked(chargerID)
+	cp := r.ensureLocked(chargerID)
 	cp.Online = true
 	cp.LastMessageTime = time.Now().UTC()
 
@@ -138,12 +76,35 @@ func (r *Registry) ApplyStatusNotification(chargerID string, connectorID int, st
 	if errorCode != "" {
 		conn.ErrorCode = errorCode
 	}
-	if transactionID != nil {
-		tx := *transactionID
-		conn.TransactionID = &tx
+
+	connectorHasError := conn.ErrorCode != "" && conn.ErrorCode != "NoError"
+	cp.HasError = connectorHasError
+	cp.Connectors[key] = conn
+}
+
+func (r *Registry) ApplyStartTransaction(chargerID string, connectorID int, transactionID int64, meterStart float64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	cp := r.ensureLocked(chargerID)
+	cp.Online = true
+	cp.Status = "Active"
+	cp.LastMessageTime = time.Now().UTC()
+
+	key := connectorKey(connectorID)
+	conn := cp.Connectors[key]
+	if conn.ErrorCode == "" {
+		conn.ErrorCode = "NoError"
 	}
 
-	cp.HasError = conn.ErrorCode != "" && conn.ErrorCode != "NoError"
+	conn.Status = "Charging"
+	meterCopy := meterStart
+	txCopy := transactionID
+	conn.LastMeterValue = &meterCopy
+	conn.TransactionID = &txCopy
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	conn.LastMeterReceived = &now
+
 	cp.Connectors[key] = conn
 }
 
@@ -151,13 +112,12 @@ func (r *Registry) ApplyMeterValue(chargerID string, connectorID int, transactio
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	cp := r.ensureChargerLocked(chargerID)
+	cp := r.ensureLocked(chargerID)
 	cp.Online = true
 	cp.LastMessageTime = time.Now().UTC()
 
 	key := connectorKey(connectorID)
 	conn := cp.Connectors[key]
-
 	if conn.Status == "" {
 		conn.Status = "Unknown"
 	}
@@ -173,10 +133,39 @@ func (r *Registry) ApplyMeterValue(chargerID string, connectorID int, transactio
 	conn.LastMeterValue = &meterCopy
 
 	if transactionID != nil {
-		tx := *transactionID
-		conn.TransactionID = &tx
+		txCopy := *transactionID
+		conn.TransactionID = &txCopy
 	}
 
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	conn.LastMeterReceived = &now
+
+	cp.Connectors[key] = conn
+}
+
+func (r *Registry) ApplyStopTransaction(chargerID string, connectorID int, meterStop float64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	cp := r.ensureLocked(chargerID)
+	cp.Online = true
+	cp.Status = "Inactive"
+	cp.LastMessageTime = time.Now().UTC()
+
+	key := connectorKey(connectorID)
+	conn := cp.Connectors[key]
+	if conn.ErrorCode == "" {
+		conn.ErrorCode = "NoError"
+	}
+
+	if conn.LastMeterValue != nil {
+		conn.LastTransactionConsumptionKWh = deltaWh(*conn.LastMeterValue, meterStop) / 1000.0
+	}
+
+	conn.Status = "Available"
+	meterCopy := meterStop
+	conn.LastMeterValue = &meterCopy
+	conn.TransactionID = nil
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	conn.LastMeterReceived = &now
 
@@ -192,8 +181,8 @@ func (r *Registry) FindConnectorByTransactionID(chargerID string, transactionID 
 		return 0, false
 	}
 
-	for connectorID, connector := range cp.Connectors {
-		if connector.TransactionID != nil && *connector.TransactionID == transactionID {
+	for connectorID, conn := range cp.Connectors {
+		if conn.TransactionID != nil && *conn.TransactionID == transactionID {
 			id, err := strconv.Atoi(connectorID)
 			if err == nil {
 				return id, true
@@ -212,8 +201,7 @@ func (r *Registry) Snapshot(chargerID string) (*ChargerState, bool) {
 	if cp == nil {
 		return nil, false
 	}
-
-	return cloneChargerState(cp), true
+	return clone(cp), true
 }
 
 func (r *Registry) SnapshotAll() map[string]*ChargerState {
@@ -222,12 +210,12 @@ func (r *Registry) SnapshotAll() map[string]*ChargerState {
 
 	out := make(map[string]*ChargerState, len(r.chargers))
 	for id, cp := range r.chargers {
-		out[id] = cloneChargerState(cp)
+		out[id] = clone(cp)
 	}
 	return out
 }
 
-func (r *Registry) ensureChargerLocked(chargerID string) *ChargerState {
+func (r *Registry) ensureLocked(chargerID string) *ChargerState {
 	cp := r.chargers[chargerID]
 	if cp == nil {
 		cp = &ChargerState{
@@ -242,11 +230,11 @@ func (r *Registry) ensureChargerLocked(chargerID string) *ChargerState {
 	return cp
 }
 
-func cloneChargerState(cp *ChargerState) *ChargerState {
+func clone(cp *ChargerState) *ChargerState {
 	copyCP := *cp
 	copyCP.Connectors = make(map[string]ConnectorState, len(cp.Connectors))
-	for id, connector := range cp.Connectors {
-		copyCP.Connectors[id] = connector
+	for k, v := range cp.Connectors {
+		copyCP.Connectors[k] = v
 	}
 	return &copyCP
 }

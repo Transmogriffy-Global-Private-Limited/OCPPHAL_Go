@@ -1,0 +1,337 @@
+package ocpp16hal
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strconv"
+	"strings"
+	"time"
+
+	ocpp16 "github.com/lorenzodonini/ocpp-go/ocpp1.6"
+	"github.com/lorenzodonini/ocpp-go/ocpp1.6/core"
+	"github.com/lorenzodonini/ocpp-go/ocpp1.6/types"
+
+	"github.com/Transmogriffy-Global-Private-Limited/OCPPHAL_Go/internal/state"
+	"github.com/Transmogriffy-Global-Private-Limited/OCPPHAL_Go/internal/store"
+)
+
+const heartbeatIntervalSeconds = 900
+
+type HAL struct {
+	cs       ocpp16.CentralSystem
+	registry *state.Registry
+	store    store.TransactionStore
+	logger   *slog.Logger
+}
+
+func New(registry *state.Registry, txStore store.TransactionStore, logger *slog.Logger) *HAL {
+	h := &HAL{
+		cs:       ocpp16.NewCentralSystem(nil, nil),
+		registry: registry,
+		store:    txStore,
+		logger:   logger,
+	}
+
+	h.cs.SetNewChargePointHandler(func(chargePoint ocpp16.ChargePointConnection) {
+		chargePointID := chargePoint.ID()
+
+		h.logger.Info(
+			"charge point connected",
+			"charge_point_id", chargePointID,
+			"remote_addr", chargePoint.RemoteAddr(),
+		)
+
+		h.registry.Touch(chargePointID)
+	})
+
+	h.cs.SetChargePointDisconnectedHandler(func(chargePoint ocpp16.ChargePointConnection) {
+		chargePointID := chargePoint.ID()
+
+		h.logger.Info(
+			"charge point disconnected",
+			"charge_point_id", chargePointID,
+			"remote_addr", chargePoint.RemoteAddr(),
+		)
+
+		h.registry.MarkOffline(chargePointID)
+	})
+
+	h.cs.SetCoreHandler(h)
+
+	return h
+}
+
+func (h *HAL) Start(port int, path string) {
+	h.logger.Info("starting ocpp-go central system", "port", port, "path", path)
+	h.cs.Start(port, path)
+}
+
+func (h *HAL) Stop() {
+	h.cs.Stop()
+}
+
+func (h *HAL) Errors() <-chan error {
+	return h.cs.Errors()
+}
+
+func (h *HAL) RemoteStartTransaction(ctx context.Context, chargerID string, idTag string, connectorID int) (string, error) {
+	resultCh := make(chan struct {
+		status string
+		err    error
+	}, 1)
+
+	props := []func(*core.RemoteStartTransactionRequest){}
+	if connectorID > 0 {
+		connectorCopy := connectorID
+		props = append(props, func(req *core.RemoteStartTransactionRequest) {
+			req.ConnectorId = &connectorCopy
+		})
+	}
+
+	err := h.cs.RemoteStartTransaction(
+		chargerID,
+		func(conf *core.RemoteStartTransactionConfirmation, err error) {
+			if err != nil {
+				resultCh <- struct {
+					status string
+					err    error
+				}{"", err}
+				return
+			}
+
+			if conf == nil {
+				resultCh <- struct {
+					status string
+					err    error
+				}{"", errors.New("nil RemoteStartTransaction confirmation")}
+				return
+			}
+
+			resultCh <- struct {
+				status string
+				err    error
+			}{string(conf.Status), nil}
+		},
+		idTag,
+		props...,
+	)
+	if err != nil {
+		return "", err
+	}
+
+	select {
+	case result := <-resultCh:
+		return result.status, result.err
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+func (h *HAL) RemoteStopTransaction(ctx context.Context, chargerID string, transactionID int) (string, error) {
+	resultCh := make(chan struct {
+		status string
+		err    error
+	}, 1)
+
+	err := h.cs.RemoteStopTransaction(
+		chargerID,
+		func(conf *core.RemoteStopTransactionConfirmation, err error) {
+			if err != nil {
+				resultCh <- struct {
+					status string
+					err    error
+				}{"", err}
+				return
+			}
+
+			if conf == nil {
+				resultCh <- struct {
+					status string
+					err    error
+				}{"", errors.New("nil RemoteStopTransaction confirmation")}
+				return
+			}
+
+			resultCh <- struct {
+				status string
+				err    error
+			}{string(conf.Status), nil}
+		},
+		transactionID,
+	)
+	if err != nil {
+		return "", err
+	}
+
+	select {
+	case result := <-resultCh:
+		return result.status, result.err
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+func (h *HAL) OnAuthorize(chargePointID string, request *core.AuthorizeRequest) (*core.AuthorizeConfirmation, error) {
+	h.registry.Touch(chargePointID)
+	return core.NewAuthorizationConfirmation(types.NewIdTagInfo(types.AuthorizationStatusAccepted)), nil
+}
+
+func (h *HAL) OnBootNotification(chargePointID string, request *core.BootNotificationRequest) (*core.BootNotificationConfirmation, error) {
+	h.registry.Touch(chargePointID)
+
+	return core.NewBootNotificationConfirmation(
+		types.NewDateTime(time.Now().UTC()),
+		heartbeatIntervalSeconds,
+		core.RegistrationStatusAccepted,
+	), nil
+}
+
+func (h *HAL) OnDataTransfer(chargePointID string, request *core.DataTransferRequest) (*core.DataTransferConfirmation, error) {
+	h.registry.Touch(chargePointID)
+	return core.NewDataTransferConfirmation(core.DataTransferStatusAccepted), nil
+}
+
+func (h *HAL) OnHeartbeat(chargePointID string, request *core.HeartbeatRequest) (*core.HeartbeatConfirmation, error) {
+	h.registry.Touch(chargePointID)
+	return core.NewHeartbeatConfirmation(types.NewDateTime(time.Now().UTC())), nil
+}
+
+func (h *HAL) OnStatusNotification(chargePointID string, request *core.StatusNotificationRequest) (*core.StatusNotificationConfirmation, error) {
+	h.registry.ApplyStatusNotification(
+		chargePointID,
+		request.ConnectorId,
+		string(request.Status),
+		string(request.ErrorCode),
+	)
+
+	return core.NewStatusNotificationConfirmation(), nil
+}
+
+func (h *HAL) OnStartTransaction(chargePointID string, request *core.StartTransactionRequest) (*core.StartTransactionConfirmation, error) {
+	h.registry.Touch(chargePointID)
+
+	tx, err := h.store.CreateTransaction(context.Background(), store.CreateTransactionInput{
+		ChargerID:       chargePointID,
+		ConnectorID:     request.ConnectorId,
+		MeterStart:      float64(request.MeterStart),
+		IDTag:           request.IdTag,
+		IsSingleSession: false,
+	})
+	if err != nil {
+		h.logger.Error("failed to create transaction", "charge_point_id", chargePointID, "error", err)
+		return core.NewStartTransactionConfirmation(types.NewIdTagInfo(types.AuthorizationStatusBlocked), 0), nil
+	}
+
+	h.registry.ApplyStartTransaction(
+		chargePointID,
+		request.ConnectorId,
+		tx.TransactionID,
+		float64(request.MeterStart),
+	)
+
+	return core.NewStartTransactionConfirmation(
+		types.NewIdTagInfo(types.AuthorizationStatusAccepted),
+		int(tx.TransactionID),
+	), nil
+}
+
+func (h *HAL) OnMeterValues(chargePointID string, request *core.MeterValuesRequest) (*core.MeterValuesConfirmation, error) {
+	h.registry.Touch(chargePointID)
+
+	meterValueWh, ok := extractMeterValueWh(request)
+	if ok {
+		var txID64 *int64
+
+		if request.TransactionId != nil && *request.TransactionId > 0 {
+			v := int64(*request.TransactionId)
+			txID64 = &v
+		}
+
+		h.registry.ApplyMeterValue(chargePointID, request.ConnectorId, txID64, meterValueWh)
+
+		if txID64 != nil {
+			if _, err := h.store.UpdateLiveMeter(context.Background(), store.UpdateLiveMeterInput{
+				ChargerID:     chargePointID,
+				TransactionID: *txID64,
+				MeterStop:     meterValueWh,
+			}); err != nil {
+				h.logger.Warn(
+					"failed to update live meter",
+					"charge_point_id", chargePointID,
+					"transaction_id", *txID64,
+					"error", err,
+				)
+			}
+		}
+	}
+
+	return core.NewMeterValuesConfirmation(), nil
+}
+
+func (h *HAL) OnStopTransaction(chargePointID string, request *core.StopTransactionRequest) (*core.StopTransactionConfirmation, error) {
+	h.registry.Touch(chargePointID)
+
+	txID := int64(request.TransactionId)
+
+	tx, err := h.store.StopTransaction(context.Background(), store.StopTransactionInput{
+		ChargerID:     chargePointID,
+		TransactionID: txID,
+		MeterStop:     float64(request.MeterStop),
+	})
+	if err != nil {
+		h.logger.Error(
+			"failed to stop transaction",
+			"charge_point_id", chargePointID,
+			"transaction_id", txID,
+			"error", err,
+		)
+
+		if connectorID, ok := h.registry.FindConnectorByTransactionID(chargePointID, txID); ok {
+			h.registry.ApplyStopTransaction(chargePointID, connectorID, float64(request.MeterStop))
+		}
+
+		return core.NewStopTransactionConfirmation(), nil
+	}
+
+	h.registry.ApplyStopTransaction(chargePointID, tx.ConnectorID, float64(request.MeterStop))
+
+	return core.NewStopTransactionConfirmation(), nil
+}
+
+func extractMeterValueWh(request *core.MeterValuesRequest) (float64, bool) {
+	for i := len(request.MeterValue) - 1; i >= 0; i-- {
+		mv := request.MeterValue[i]
+		if len(mv.SampledValue) == 0 {
+			continue
+		}
+
+		selected := mv.SampledValue[0]
+
+		for _, sample := range mv.SampledValue {
+			if strings.EqualFold(string(sample.Measurand), "Energy.Active.Import.Register") {
+				selected = sample
+				break
+			}
+		}
+
+		value, err := strconv.ParseFloat(strings.TrimSpace(selected.Value), 64)
+		if err != nil {
+			continue
+		}
+
+		unit := strings.ToLower(strings.TrimSpace(string(selected.Unit)))
+		if unit == "kwh" || unit == "kilowatthour" {
+			value *= 1000.0
+		}
+
+		return value, true
+	}
+
+	return 0, false
+}
+
+func ConnectedURL(host string, port int, chargerID string) string {
+	return fmt.Sprintf("ws://%s:%d/%s", host, port, chargerID)
+}
