@@ -197,6 +197,84 @@ func statusPayload(cp *state.ChargerState) map[string]any {
 	}
 }
 
+type remoteStartTransactionRequest struct {
+	UID             string `json:"uid"`
+	IDTag           string `json:"id_tag"`
+	ConnectorID     int    `json:"connector_id"`
+	IsSingleSession bool   `json:"is_single_session"`
+}
+
+type remoteStartTransactionResponse struct {
+	Status string `json:"status"`
+}
+
+type remoteStartTransactionConf struct {
+	Status string `json:"status"`
+}
+
+func (s *Server) remoteStartTransaction(w http.ResponseWriter, r *http.Request) {
+	var req remoteStartTransactionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"detail": "Invalid JSON",
+		})
+		return
+	}
+
+	if req.UID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"detail": "Missing uid",
+		})
+		return
+	}
+
+	if req.IDTag == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"detail": "Missing id_tag",
+		})
+		return
+	}
+
+	if req.ConnectorID <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"detail": "Invalid connector_id",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+
+	payload := map[string]any{
+		"idTag":       req.IDTag,
+		"connectorId": req.ConnectorID,
+	}
+
+	raw, err := s.manager.Call(ctx, req.UID, "RemoteStartTransaction", payload)
+	if err != nil {
+		s.logger.Warn("RemoteStartTransaction failed", "charger_id", req.UID, "error", err)
+		writeJSON(w, http.StatusNotFound, map[string]any{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	var conf remoteStartTransactionConf
+	if err := json.Unmarshal(raw, &conf); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"error": "Invalid RemoteStartTransaction response from charger",
+		})
+		return
+	}
+
+	if conf.Status == "" {
+		conf.Status = "Unknown"
+	}
+
+	writeJSON(w, http.StatusOK, remoteStartTransactionResponse{
+		Status: conf.Status,
+	})
+}
 func (s *Server) frontendWebSocket(w http.ResponseWriter, r *http.Request) {
 	uid := strings.TrimPrefix(r.URL.Path, "/frontend/ws/")
 	if uid == "" || strings.Contains(uid, "/") {
