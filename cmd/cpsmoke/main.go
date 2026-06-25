@@ -28,14 +28,17 @@ func newSmokeHandler() *smokeHandler {
 }
 
 func (h *smokeHandler) OnChangeAvailability(request *core.ChangeAvailabilityRequest) (*core.ChangeAvailabilityConfirmation, error) {
+	fmt.Println("ChargePoint received ChangeAvailability")
 	return core.NewChangeAvailabilityConfirmation(core.AvailabilityStatusAccepted), nil
 }
 
 func (h *smokeHandler) OnChangeConfiguration(request *core.ChangeConfigurationRequest) (*core.ChangeConfigurationConfirmation, error) {
+	fmt.Println("ChargePoint received ChangeConfiguration:", request.Key, request.Value)
 	return core.NewChangeConfigurationConfirmation(core.ConfigurationStatusAccepted), nil
 }
 
 func (h *smokeHandler) OnClearCache(request *core.ClearCacheRequest) (*core.ClearCacheConfirmation, error) {
+	fmt.Println("ChargePoint received ClearCache")
 	return core.NewClearCacheConfirmation(core.ClearCacheStatusAccepted), nil
 }
 
@@ -44,6 +47,7 @@ func (h *smokeHandler) OnDataTransfer(request *core.DataTransferRequest) (*core.
 }
 
 func (h *smokeHandler) OnGetConfiguration(request *core.GetConfigurationRequest) (*core.GetConfigurationConfirmation, error) {
+	fmt.Println("ChargePoint received GetConfiguration")
 	return core.NewGetConfigurationConfirmation([]core.ConfigurationKey{}), nil
 }
 
@@ -70,15 +74,17 @@ func (h *smokeHandler) OnRemoteStopTransaction(request *core.RemoteStopTransacti
 }
 
 func (h *smokeHandler) OnReset(request *core.ResetRequest) (*core.ResetConfirmation, error) {
+	fmt.Println("ChargePoint received Reset")
 	return core.NewResetConfirmation(core.ResetStatusAccepted), nil
 }
 
 func (h *smokeHandler) OnUnlockConnector(request *core.UnlockConnectorRequest) (*core.UnlockConnectorConfirmation, error) {
+	fmt.Println("ChargePoint received UnlockConnector")
 	return core.NewUnlockConnectorConfirmation(core.UnlockStatusUnlocked), nil
 }
 
 func main() {
-	clientID := env("CLIENT_ID", "CP-REST-001")
+	clientID := env("CLIENT_ID", "CP-REST-CORE-001")
 	centralSystemURL := env("CENTRAL_SYSTEM_URL", "ws://127.0.0.1:18081")
 	restBaseURL := env("REST_BASE_URL", "http://127.0.0.1:18080")
 	apiKey := env("API_KEY", "testkey")
@@ -107,6 +113,61 @@ func main() {
 		log.Fatalf("StatusNotification Available failed: %v", err)
 	}
 	fmt.Println("StatusNotification: Available")
+
+	fmt.Println("REST /api/change_availability:", postJSON(
+		restBaseURL+"/api/change_availability",
+		apiKey,
+		map[string]any{
+			"uid":          clientID,
+			"connector_id": 1,
+			"type":         "Operative",
+		},
+	))
+
+	fmt.Println("REST /api/change_configuration:", postJSON(
+		restBaseURL+"/api/change_configuration",
+		apiKey,
+		map[string]any{
+			"uid":   clientID,
+			"key":   "HeartbeatInterval",
+			"value": "900",
+		},
+	))
+
+	fmt.Println("REST /api/clear_cache:", postJSON(
+		restBaseURL+"/api/clear_cache",
+		apiKey,
+		map[string]any{
+			"uid": clientID,
+		},
+	))
+
+	fmt.Println("REST /api/unlock_connector:", postJSON(
+		restBaseURL+"/api/unlock_connector",
+		apiKey,
+		map[string]any{
+			"uid":          clientID,
+			"connector_id": 1,
+		},
+	))
+
+	fmt.Println("REST /api/reset:", postJSON(
+		restBaseURL+"/api/reset",
+		apiKey,
+		map[string]any{
+			"uid":  clientID,
+			"type": "Soft",
+		},
+	))
+
+	fmt.Println("REST /api/get_configuration:", postJSON(
+		restBaseURL+"/api/get_configuration",
+		apiKey,
+		map[string]any{
+			"uid": clientID,
+			"key": []string{"HeartbeatInterval"},
+		},
+	))
 
 	remoteStartStatus := postJSON(
 		restBaseURL+"/api/start_transaction",
@@ -199,7 +260,7 @@ func main() {
 	}
 	fmt.Println("StatusNotification: Available after stop")
 
-	fmt.Println("REST outbound smoke complete")
+	fmt.Println("REST core outbound smoke complete")
 }
 
 func waitRemoteStart(ch <-chan *core.RemoteStartTransactionRequest, timeout time.Duration) *core.RemoteStartTransactionRequest {

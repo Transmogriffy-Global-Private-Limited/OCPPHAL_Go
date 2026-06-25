@@ -41,10 +41,10 @@ func (s *Server) Routes() http.Handler {
 		"/api/change_configuration",
 		"/api/clear_cache",
 		"/api/unlock_connector",
-		"/api/get_diagnostics",
-		"/api/update_firmware",
 		"/api/reset",
 		"/api/get_configuration",
+		"/api/get_diagnostics",
+		"/api/update_firmware",
 		"/api/trigger_message",
 		"/api/charger_analytics",
 		"/api/check_charger_inactivity",
@@ -102,12 +102,40 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 		s.remoteStart(w, r)
 	case "/api/stop_transaction":
 		s.remoteStop(w, r)
+	case "/api/change_availability":
+		s.changeAvailability(w, r)
+	case "/api/change_configuration":
+		s.changeConfiguration(w, r)
+	case "/api/clear_cache":
+		s.clearCache(w, r)
+	case "/api/unlock_connector":
+		s.unlockConnector(w, r)
+	case "/api/reset":
+		s.reset(w, r)
+	case "/api/get_configuration":
+		s.getConfiguration(w, r)
 	default:
 		writeJSON(w, http.StatusNotImplemented, map[string]any{
 			"error": "route not implemented yet in ocpp-go rewrite",
 			"path":  r.URL.Path,
 		})
 	}
+}
+
+type baseChargerRequest struct {
+	UID           string `json:"uid"`
+	ChargePointID string `json:"charge_point_id"`
+	ClientID      string `json:"client_id"`
+}
+
+func (r baseChargerRequest) chargerID() string {
+	if r.UID != "" {
+		return r.UID
+	}
+	if r.ChargePointID != "" {
+		return r.ChargePointID
+	}
+	return r.ClientID
 }
 
 type statusRequest struct {
@@ -170,19 +198,11 @@ func statusPayload(cp *state.ChargerState) map[string]any {
 }
 
 type remoteStartRequest struct {
-	UID           string `json:"uid"`
-	ChargePointID string `json:"charge_point_id"`
-	IDTagSnake    string `json:"id_tag"`
-	IDTagCamel    string `json:"idTag"`
-	ConnectorID   int    `json:"connector_id"`
-	ConnectorId   int    `json:"connectorId"`
-}
-
-func (r remoteStartRequest) chargerID() string {
-	if r.UID != "" {
-		return r.UID
-	}
-	return r.ChargePointID
+	baseChargerRequest
+	IDTagSnake  string `json:"id_tag"`
+	IDTagCamel  string `json:"idTag"`
+	ConnectorID int    `json:"connector_id"`
+	ConnectorId int    `json:"connectorId"`
 }
 
 func (r remoteStartRequest) idTag() string {
@@ -201,8 +221,7 @@ func (r remoteStartRequest) connectorID() int {
 
 func (s *Server) remoteStart(w http.ResponseWriter, r *http.Request) {
 	var req remoteStartRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "Invalid JSON"})
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -224,8 +243,7 @@ func (s *Server) remoteStart(w http.ResponseWriter, r *http.Request) {
 
 	status, err := s.hal.RemoteStartTransaction(ctx, chargerID, idTag, connectorID)
 	if err != nil {
-		s.logger.Warn("remote start failed", "charger_id", chargerID, "error", err)
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
+		s.writeRemoteError(w, "remote start failed", chargerID, err)
 		return
 	}
 
@@ -233,17 +251,9 @@ func (s *Server) remoteStart(w http.ResponseWriter, r *http.Request) {
 }
 
 type remoteStopRequest struct {
-	UID           string `json:"uid"`
-	ChargePointID string `json:"charge_point_id"`
-	TransactionID int    `json:"transaction_id"`
-	TransactionId int    `json:"transactionId"`
-}
-
-func (r remoteStopRequest) chargerID() string {
-	if r.UID != "" {
-		return r.UID
-	}
-	return r.ChargePointID
+	baseChargerRequest
+	TransactionID int `json:"transaction_id"`
+	TransactionId int `json:"transactionId"`
 }
 
 func (r remoteStopRequest) transactionID() int {
@@ -255,8 +265,7 @@ func (r remoteStopRequest) transactionID() int {
 
 func (s *Server) remoteStop(w http.ResponseWriter, r *http.Request) {
 	var req remoteStopRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "Invalid JSON"})
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -277,12 +286,254 @@ func (s *Server) remoteStop(w http.ResponseWriter, r *http.Request) {
 
 	status, err := s.hal.RemoteStopTransaction(ctx, chargerID, transactionID)
 	if err != nil {
-		s.logger.Warn("remote stop failed", "charger_id", chargerID, "transaction_id", transactionID, "error", err)
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
+		s.writeRemoteError(w, "remote stop failed", chargerID, err)
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": status})
+}
+
+type changeAvailabilityRequest struct {
+	baseChargerRequest
+	ConnectorID      int    `json:"connector_id"`
+	ConnectorId      int    `json:"connectorId"`
+	Type             string `json:"type"`
+	AvailabilityType string `json:"availability_type"`
+}
+
+func (r changeAvailabilityRequest) connectorID() int {
+	if r.ConnectorID > 0 {
+		return r.ConnectorID
+	}
+	return r.ConnectorId
+}
+
+func (r changeAvailabilityRequest) availabilityType() string {
+	if r.Type != "" {
+		return r.Type
+	}
+	return r.AvailabilityType
+}
+
+func (s *Server) changeAvailability(w http.ResponseWriter, r *http.Request) {
+	var req changeAvailabilityRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	chargerID := req.chargerID()
+	if chargerID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "Missing uid/charge_point_id"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+
+	status, err := s.hal.ChangeAvailability(ctx, chargerID, req.connectorID(), req.availabilityType())
+	if err != nil {
+		s.writeRemoteError(w, "change availability failed", chargerID, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": status})
+}
+
+type changeConfigurationRequest struct {
+	baseChargerRequest
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+func (s *Server) changeConfiguration(w http.ResponseWriter, r *http.Request) {
+	var req changeConfigurationRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	chargerID := req.chargerID()
+	if chargerID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "Missing uid/charge_point_id"})
+		return
+	}
+	if req.Key == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "Missing key"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+
+	status, err := s.hal.ChangeConfiguration(ctx, chargerID, req.Key, req.Value)
+	if err != nil {
+		s.writeRemoteError(w, "change configuration failed", chargerID, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": status})
+}
+
+func (s *Server) clearCache(w http.ResponseWriter, r *http.Request) {
+	var req baseChargerRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	chargerID := req.chargerID()
+	if chargerID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "Missing uid/charge_point_id"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+
+	status, err := s.hal.ClearCache(ctx, chargerID)
+	if err != nil {
+		s.writeRemoteError(w, "clear cache failed", chargerID, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": status})
+}
+
+type unlockConnectorRequest struct {
+	baseChargerRequest
+	ConnectorID int `json:"connector_id"`
+	ConnectorId int `json:"connectorId"`
+}
+
+func (r unlockConnectorRequest) connectorID() int {
+	if r.ConnectorID > 0 {
+		return r.ConnectorID
+	}
+	return r.ConnectorId
+}
+
+func (s *Server) unlockConnector(w http.ResponseWriter, r *http.Request) {
+	var req unlockConnectorRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	chargerID := req.chargerID()
+	connectorID := req.connectorID()
+
+	if chargerID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "Missing uid/charge_point_id"})
+		return
+	}
+	if connectorID <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "Invalid connector_id/connectorId"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+
+	status, err := s.hal.UnlockConnector(ctx, chargerID, connectorID)
+	if err != nil {
+		s.writeRemoteError(w, "unlock connector failed", chargerID, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": status})
+}
+
+type resetRequest struct {
+	baseChargerRequest
+	Type      string `json:"type"`
+	ResetType string `json:"reset_type"`
+}
+
+func (r resetRequest) resetType() string {
+	if r.Type != "" {
+		return r.Type
+	}
+	return r.ResetType
+}
+
+func (s *Server) reset(w http.ResponseWriter, r *http.Request) {
+	var req resetRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	chargerID := req.chargerID()
+	resetType := req.resetType()
+	if resetType == "" {
+		resetType = "Soft"
+	}
+
+	if chargerID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "Missing uid/charge_point_id"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+
+	status, err := s.hal.Reset(ctx, chargerID, resetType)
+	if err != nil {
+		s.writeRemoteError(w, "reset failed", chargerID, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": status})
+}
+
+type getConfigurationRequest struct {
+	baseChargerRequest
+	Key               []string `json:"key"`
+	Keys              []string `json:"keys"`
+	ConfigurationKeys []string `json:"configuration_keys"`
+}
+
+func (r getConfigurationRequest) keys() []string {
+	if len(r.Key) > 0 {
+		return r.Key
+	}
+	if len(r.Keys) > 0 {
+		return r.Keys
+	}
+	return r.ConfigurationKeys
+}
+
+func (s *Server) getConfiguration(w http.ResponseWriter, r *http.Request) {
+	var req getConfigurationRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	chargerID := req.chargerID()
+	if chargerID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "Missing uid/charge_point_id"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+
+	conf, err := s.hal.GetConfiguration(ctx, chargerID, req.keys())
+	if err != nil {
+		s.writeRemoteError(w, "get configuration failed", chargerID, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, conf)
+}
+
+func (s *Server) writeRemoteError(w http.ResponseWriter, msg string, chargerID string, err error) {
+	s.logger.Warn(msg, "charger_id", chargerID, "error", err)
+	writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "Invalid JSON"})
+		return false
+	}
+	return true
 }
 
 func setCORS(w http.ResponseWriter) {

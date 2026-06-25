@@ -173,6 +173,271 @@ func (h *HAL) RemoteStopTransaction(ctx context.Context, chargerID string, trans
 	}
 }
 
+func (h *HAL) ChangeAvailability(ctx context.Context, chargerID string, connectorID int, availabilityType string) (string, error) {
+	var t core.AvailabilityType
+	switch strings.ToLower(strings.TrimSpace(availabilityType)) {
+	case "operative":
+		t = core.AvailabilityTypeOperative
+	case "inoperative":
+		t = core.AvailabilityTypeInoperative
+	default:
+		return "", fmt.Errorf("invalid availability type %q", availabilityType)
+	}
+
+	resultCh := make(chan struct {
+		status string
+		err    error
+	}, 1)
+
+	err := h.cs.ChangeAvailability(
+		chargerID,
+		func(conf *core.ChangeAvailabilityConfirmation, err error) {
+			if err != nil {
+				resultCh <- struct {
+					status string
+					err    error
+				}{"", err}
+				return
+			}
+			if conf == nil {
+				resultCh <- struct {
+					status string
+					err    error
+				}{"", errors.New("nil ChangeAvailability confirmation")}
+				return
+			}
+			resultCh <- struct {
+				status string
+				err    error
+			}{string(conf.Status), nil}
+		},
+		connectorID,
+		t,
+	)
+	if err != nil {
+		return "", err
+	}
+
+	select {
+	case result := <-resultCh:
+		return result.status, result.err
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+func (h *HAL) ChangeConfiguration(ctx context.Context, chargerID string, key string, value string) (string, error) {
+	resultCh := make(chan struct {
+		status string
+		err    error
+	}, 1)
+
+	err := h.cs.ChangeConfiguration(
+		chargerID,
+		func(conf *core.ChangeConfigurationConfirmation, err error) {
+			if err != nil {
+				resultCh <- struct {
+					status string
+					err    error
+				}{"", err}
+				return
+			}
+			if conf == nil {
+				resultCh <- struct {
+					status string
+					err    error
+				}{"", errors.New("nil ChangeConfiguration confirmation")}
+				return
+			}
+			resultCh <- struct {
+				status string
+				err    error
+			}{string(conf.Status), nil}
+		},
+		key,
+		value,
+	)
+	if err != nil {
+		return "", err
+	}
+
+	select {
+	case result := <-resultCh:
+		return result.status, result.err
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+func (h *HAL) ClearCache(ctx context.Context, chargerID string) (string, error) {
+	resultCh := make(chan struct {
+		status string
+		err    error
+	}, 1)
+
+	err := h.cs.ClearCache(
+		chargerID,
+		func(conf *core.ClearCacheConfirmation, err error) {
+			if err != nil {
+				resultCh <- struct {
+					status string
+					err    error
+				}{"", err}
+				return
+			}
+			if conf == nil {
+				resultCh <- struct {
+					status string
+					err    error
+				}{"", errors.New("nil ClearCache confirmation")}
+				return
+			}
+			resultCh <- struct {
+				status string
+				err    error
+			}{string(conf.Status), nil}
+		},
+	)
+	if err != nil {
+		return "", err
+	}
+
+	select {
+	case result := <-resultCh:
+		return result.status, result.err
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+func (h *HAL) UnlockConnector(ctx context.Context, chargerID string, connectorID int) (string, error) {
+	resultCh := make(chan struct {
+		status string
+		err    error
+	}, 1)
+
+	err := h.cs.UnlockConnector(
+		chargerID,
+		func(conf *core.UnlockConnectorConfirmation, err error) {
+			if err != nil {
+				resultCh <- struct {
+					status string
+					err    error
+				}{"", err}
+				return
+			}
+			if conf == nil {
+				resultCh <- struct {
+					status string
+					err    error
+				}{"", errors.New("nil UnlockConnector confirmation")}
+				return
+			}
+			resultCh <- struct {
+				status string
+				err    error
+			}{string(conf.Status), nil}
+		},
+		connectorID,
+	)
+	if err != nil {
+		return "", err
+	}
+
+	select {
+	case result := <-resultCh:
+		return result.status, result.err
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+func (h *HAL) Reset(ctx context.Context, chargerID string, resetType string) (string, error) {
+	var t core.ResetType
+	switch strings.ToLower(strings.TrimSpace(resetType)) {
+	case "soft":
+		t = core.ResetTypeSoft
+	case "hard":
+		t = core.ResetTypeHard
+	default:
+		return "", fmt.Errorf("invalid reset type %q", resetType)
+	}
+
+	resultCh := make(chan struct {
+		status string
+		err    error
+	}, 1)
+
+	err := h.cs.Reset(
+		chargerID,
+		func(conf *core.ResetConfirmation, err error) {
+			if err != nil {
+				resultCh <- struct {
+					status string
+					err    error
+				}{"", err}
+				return
+			}
+			if conf == nil {
+				resultCh <- struct {
+					status string
+					err    error
+				}{"", errors.New("nil Reset confirmation")}
+				return
+			}
+			resultCh <- struct {
+				status string
+				err    error
+			}{string(conf.Status), nil}
+		},
+		t,
+	)
+	if err != nil {
+		return "", err
+	}
+
+	select {
+	case result := <-resultCh:
+		return result.status, result.err
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+func (h *HAL) GetConfiguration(ctx context.Context, chargerID string, keys []string) (*core.GetConfigurationConfirmation, error) {
+	resultCh := make(chan struct {
+		conf *core.GetConfigurationConfirmation
+		err  error
+	}, 1)
+
+	err := h.cs.GetConfiguration(
+		chargerID,
+		func(conf *core.GetConfigurationConfirmation, err error) {
+			resultCh <- struct {
+				conf *core.GetConfigurationConfirmation
+				err  error
+			}{conf, err}
+		},
+		keys,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			return nil, result.err
+		}
+		if result.conf == nil {
+			return nil, errors.New("nil GetConfiguration confirmation")
+		}
+		return result.conf, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func (h *HAL) OnAuthorize(chargePointID string, request *core.AuthorizeRequest) (*core.AuthorizeConfirmation, error) {
 	h.registry.Touch(chargePointID)
 	return core.NewAuthorizationConfirmation(types.NewIdTagInfo(types.AuthorizationStatusAccepted)), nil
