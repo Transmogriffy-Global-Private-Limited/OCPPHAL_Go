@@ -32,6 +32,7 @@ func main() {
 
 	registry := state.NewRegistry()
 	hal := ocpp16hal.New(registry, txStore, hookManager, logger)
+	hookManager.SetLimitStopper(hal)
 
 	go func() {
 		hal.Start(cfg.OCPPListenPort, cfg.OCPPListenPath)

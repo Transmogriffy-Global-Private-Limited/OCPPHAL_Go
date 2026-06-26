@@ -7,19 +7,20 @@ import (
 )
 
 type Transaction struct {
-	ID               int64
-	UUIDDB           string
-	ChargerID        string
-	ConnectorID      int
-	MeterStart       float64
-	MeterStop        *float64
-	TotalConsumption *float64
-	StartTime        time.Time
-	StopTime         *time.Time
-	IDTag            string
-	TransactionID    int64
-	IsSingleSession  bool
-	MaxKWh           *float64
+	ID                 int64
+	UUIDDB             string
+	ChargerID          string
+	ConnectorID        int
+	MeterStart         float64
+	MeterStop          *float64
+	TotalConsumption   *float64
+	StartTime          time.Time
+	StopTime           *time.Time
+	IDTag              string
+	TransactionID      int64
+	IsSingleSession    bool
+	MaxKWh             *float64
+	LimitStopRequested bool
 }
 
 type CreateTransactionInput struct {
@@ -70,6 +71,7 @@ type TransactionStore interface {
 	StopTransaction(ctx context.Context, input StopTransactionInput) (*Transaction, error)
 	GetByTransactionID(ctx context.Context, chargerID string, transactionID int64) (*Transaction, error)
 	UpdateTransactionMaxKWh(ctx context.Context, transactionID int64, maxKWh float64) error
+	CheckAndMarkLimitStop(ctx context.Context, chargerID string, transactionID int64) (bool, error)
 
 	ChargerAnalytics(ctx context.Context, input AnalyticsInput) (*AnalyticsOutput, error)
 

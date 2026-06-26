@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -32,6 +33,7 @@ func main() {
 		}
 
 		body, _ := io.ReadAll(r.Body)
+
 		logger.Info(
 			"received start transaction hook",
 			"path", r.URL.Path,
@@ -40,7 +42,7 @@ func main() {
 		)
 
 		writeJSON(w, http.StatusOK, map[string]any{
-			"max_kwh": 7.5,
+			"max_kwh": envFloat("MOCK_START_MAX_KWH", 7.5),
 		})
 	})
 
@@ -51,6 +53,7 @@ func main() {
 		}
 
 		body, _ := io.ReadAll(r.Body)
+
 		logger.Info(
 			"received completed transaction hook",
 			"path", r.URL.Path,
@@ -89,4 +92,18 @@ func env(key string, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func envFloat(key string, fallback float64) float64 {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return fallback
+	}
+
+	return parsed
 }

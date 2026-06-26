@@ -22,11 +22,17 @@ const (
 	KindCompletedTransaction = "completed_transaction"
 )
 
+type LimitStopper interface {
+	CheckAndRequestLimitStop(ctx context.Context, chargerID string, transactionID int64)
+}
+
 type Manager struct {
 	cfg    config.Config
 	store  store.TransactionStore
 	logger *slog.Logger
 	client *http.Client
+
+	limitStopper LimitStopper
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -44,6 +50,10 @@ func NewManager(cfg config.Config, txStore store.TransactionStore, logger *slog.
 		ctx:    ctx,
 		cancel: cancel,
 	}
+}
+
+func (m *Manager) SetLimitStopper(limitStopper LimitStopper) {
+	m.limitStopper = limitStopper
 }
 
 func (m *Manager) Start() {
@@ -204,13 +214,16 @@ func (m *Manager) postTask(ctx context.Context, task store.CallbackTask) (postRe
 		if err := json.Unmarshal(task.Payload, &body); err != nil {
 			return postResult{fatal: err.Error()}, nil
 		}
+
 		if txID, ok := body["transactionid"]; ok {
 			body["transactionid"] = fmt.Sprint(txID)
 		}
+
 		raw, err := json.Marshal(body)
 		if err != nil {
 			return postResult{fatal: err.Error()}, nil
 		}
+
 		payload = raw
 	}
 
@@ -248,17 +261,36 @@ func (m *Manager) postTask(ctx context.Context, task store.CallbackTask) (postRe
 		if err := json.Unmarshal(respBody, &parsed); err != nil {
 			return postResult{fatal: "invalid JSON response: " + err.Error()}, nil
 		}
+
 		if parsed.MaxKWh == nil {
 			return postResult{fatal: "missing max_kwh in response: " + string(respBody)}, nil
 		}
+
 		if task.TransactionID != nil {
 			if err := m.store.UpdateTransactionMaxKWh(ctx, *task.TransactionID, *parsed.MaxKWh); err != nil {
 				return postResult{}, err
+			}
+
+			chargerID := extractChargerID(task.Payload)
+			if chargerID != "" && m.limitStopper != nil {
+				m.limitStopper.CheckAndRequestLimitStop(context.Background(), chargerID, *task.TransactionID)
 			}
 		}
 	}
 
 	return postResult{}, nil
+}
+
+func extractChargerID(payload json.RawMessage) string {
+	var body struct {
+		ChargerID string `json:"chargerid"`
+	}
+
+	if err := json.Unmarshal(payload, &body); err != nil {
+		return ""
+	}
+
+	return body.ChargerID
 }
 
 func retryBase(kind string) time.Duration {

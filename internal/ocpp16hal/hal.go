@@ -542,6 +542,8 @@ func (h *HAL) OnMeterValues(chargePointID string, request *core.MeterValuesReque
 					"transaction_id", *txID64,
 					"error", err,
 				)
+			} else {
+				h.checkAndRemoteStopIfLimitExceeded(chargePointID, *txID64)
 			}
 		}
 	}
