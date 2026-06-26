@@ -31,3 +31,6 @@ Thumbs.db
 !.vscode/settings.json
 !.vscode/extensions.json
 .idea/
+
+# Local parity/audit workspace
+_parity/

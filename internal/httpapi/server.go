@@ -32,6 +32,7 @@ func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/hello", s.hello)
+	mux.HandleFunc("/frontend/ws/", s.frontendWebSocket)
 
 	for _, path := range []string{
 		"/api/status",
