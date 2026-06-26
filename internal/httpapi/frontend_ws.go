@@ -79,7 +79,7 @@ func (s *Server) frontendStatusPayload(uid string) any {
 				continue
 			}
 
-			resp[chargerID] = statusPayload(cp)
+			resp[chargerID] = legacyStatusPayload(cp, uid, chargerID)
 		}
 
 		return resp
@@ -95,5 +95,5 @@ func (s *Server) frontendStatusPayload(uid string) any {
 		}
 	}
 
-	return statusPayload(cp)
+	return legacyStatusPayload(cp, "specific", uid)
 }

@@ -34,3 +34,6 @@ Thumbs.db
 
 # Local parity/audit workspace
 _parity/
+
+# Local review bundles
+_review/
