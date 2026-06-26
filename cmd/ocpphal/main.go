@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Transmogriffy-Global-Private-Limited/OCPPHAL_Go/internal/config"
+	"github.com/Transmogriffy-Global-Private-Limited/OCPPHAL_Go/internal/hooks"
 	"github.com/Transmogriffy-Global-Private-Limited/OCPPHAL_Go/internal/httpapi"
 	"github.com/Transmogriffy-Global-Private-Limited/OCPPHAL_Go/internal/ocpp16hal"
 	"github.com/Transmogriffy-Global-Private-Limited/OCPPHAL_Go/internal/state"
@@ -25,8 +26,12 @@ func main() {
 	}))
 
 	txStore := chooseTransactionStore(cfg, logger)
+
+	hookManager := hooks.NewManager(cfg, txStore, logger)
+	hookManager.Start()
+
 	registry := state.NewRegistry()
-	hal := ocpp16hal.New(registry, txStore, logger)
+	hal := ocpp16hal.New(registry, txStore, hookManager, logger)
 
 	go func() {
 		hal.Start(cfg.OCPPListenPort, cfg.OCPPListenPath)
@@ -67,6 +72,7 @@ func main() {
 	}
 
 	hal.Stop()
+	hookManager.Stop()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

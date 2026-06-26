@@ -19,18 +19,25 @@ import (
 
 const heartbeatIntervalSeconds = 900
 
+type HookSink interface {
+	EnqueueStartTransaction(ctx context.Context, tx *store.Transaction) error
+	EnqueueCompletedTransaction(ctx context.Context, tx *store.Transaction) error
+}
+
 type HAL struct {
 	cs       ocpp16.CentralSystem
 	registry *state.Registry
 	store    store.TransactionStore
+	hooks    HookSink
 	logger   *slog.Logger
 }
 
-func New(registry *state.Registry, txStore store.TransactionStore, logger *slog.Logger) *HAL {
+func New(registry *state.Registry, txStore store.TransactionStore, hookSink HookSink, logger *slog.Logger) *HAL {
 	h := &HAL{
 		cs:       ocpp16.NewCentralSystem(nil, nil),
 		registry: registry,
 		store:    txStore,
+		hooks:    hookSink,
 		logger:   logger,
 	}
 
@@ -497,6 +504,12 @@ func (h *HAL) OnStartTransaction(chargePointID string, request *core.StartTransa
 		float64(request.MeterStart),
 	)
 
+	if h.hooks != nil {
+		if err := h.hooks.EnqueueStartTransaction(context.Background(), tx); err != nil {
+			h.logger.Warn("failed to enqueue start transaction hook", "charge_point_id", chargePointID, "transaction_id", tx.TransactionID, "error", err)
+		}
+	}
+
 	return core.NewStartTransactionConfirmation(
 		types.NewIdTagInfo(types.AuthorizationStatusAccepted),
 		int(tx.TransactionID),
@@ -562,6 +575,12 @@ func (h *HAL) OnStopTransaction(chargePointID string, request *core.StopTransact
 	}
 
 	h.registry.ApplyStopTransaction(chargePointID, tx.ConnectorID, float64(request.MeterStop))
+
+	if h.hooks != nil {
+		if err := h.hooks.EnqueueCompletedTransaction(context.Background(), tx); err != nil {
+			h.logger.Warn("failed to enqueue completed transaction hook", "charge_point_id", chargePointID, "transaction_id", tx.TransactionID, "error", err)
+		}
+	}
 
 	return core.NewStopTransactionConfirmation(), nil
 }

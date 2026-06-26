@@ -15,8 +15,9 @@ type Config struct {
 	OCPPListenPort int
 	OCPPListenPath string
 
-	APIKey   string
-	LogLevel slog.Level
+	APIKey     string
+	APIAuthKey string
+	LogLevel   slog.Level
 
 	DatabaseURL string
 	DBName      string
@@ -25,6 +26,12 @@ type Config struct {
 	DBHost      string
 	DBPort      int
 	DBSSLMode   string
+
+	MainCMSStartTxnHookURL       string
+	SingleSessionStartTxnHookURL string
+
+	MainCMSCompletedTxnURL       string
+	SingleSessionCompletedTxnURL string
 }
 
 func Load() Config {
@@ -35,8 +42,9 @@ func Load() Config {
 		OCPPListenPort: envInt("OCPP_LISTEN_PORT", 18081),
 		OCPPListenPath: env("OCPP_LISTEN_PATH", "/{ws}"),
 
-		APIKey:   os.Getenv("API_KEY"),
-		LogLevel: parseLogLevel(env("LOG_LEVEL", "info")),
+		APIKey:     os.Getenv("API_KEY"),
+		APIAuthKey: os.Getenv("APIAUTHKEY"),
+		LogLevel:   parseLogLevel(env("LOG_LEVEL", "info")),
 
 		DatabaseURL: os.Getenv("DATABASE_URL"),
 		DBName:      os.Getenv("DB_NAME"),
@@ -45,6 +53,12 @@ func Load() Config {
 		DBHost:      env("DB_HOST", "127.0.0.1"),
 		DBPort:      envInt("DB_PORT", 5432),
 		DBSSLMode:   env("DB_SSLMODE", "disable"),
+
+		MainCMSStartTxnHookURL:       env("MAIN_CMS_START_TXN_HOOK_URL", "https://be.cms.ocpp.transev.site/users/checkstartresponse"),
+		SingleSessionStartTxnHookURL: os.Getenv("SINGLE_SESSION_START_TXN_HOOK_URL"),
+
+		MainCMSCompletedTxnURL:       env("MAIN_CMS_COMPLETED_TXN_URL", "https://be.cms.ocpp.transev.site/users/deductcalculate"),
+		SingleSessionCompletedTxnURL: os.Getenv("SINGLE_SESSION_COMPLETED_TXN_URL"),
 	}
 }
 
