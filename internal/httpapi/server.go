@@ -175,7 +175,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			resp[chargerID] = statusPayload(cp)
+			resp[chargerID] = legacyStatusPayload(cp, req.UID, chargerID)
 		}
 
 		writeJSON(w, http.StatusOK, resp)
@@ -184,16 +184,11 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 
 	cp, ok := s.registry.Snapshot(req.UID)
 	if !ok {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status":                       "Offline",
-			"connectors":                   map[string]any{},
-			"online":                       "Offline",
-			"latest_message_received_time": nil,
-		})
+		writeJSON(w, http.StatusOK, legacyOfflineStatusPayload("specific", req.UID))
 		return
 	}
 
-	writeJSON(w, http.StatusOK, statusPayload(cp))
+	writeJSON(w, http.StatusOK, legacyStatusPayload(cp, "specific", req.UID))
 }
 
 func statusPayload(cp *state.ChargerState) map[string]any {
