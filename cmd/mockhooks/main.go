@@ -26,45 +26,11 @@ func main() {
 		})
 	})
 
-	mux.HandleFunc("/users/checkstartresponse", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
+	registerStartHook(mux, logger, "/users/checkstartresponse", "main")
+	registerCompletedHook(mux, logger, "/users/deductcalculate", "main")
 
-		body, _ := io.ReadAll(r.Body)
-
-		logger.Info(
-			"received start transaction hook",
-			"path", r.URL.Path,
-			"apiauthkey", r.Header.Get("apiauthkey"),
-			"body", string(body),
-		)
-
-		writeJSON(w, http.StatusOK, map[string]any{
-			"max_kwh": envFloat("MOCK_START_MAX_KWH", 7.5),
-		})
-	})
-
-	mux.HandleFunc("/users/deductcalculate", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-
-		body, _ := io.ReadAll(r.Body)
-
-		logger.Info(
-			"received completed transaction hook",
-			"path", r.URL.Path,
-			"apiauthkey", r.Header.Get("apiauthkey"),
-			"body", string(body),
-		)
-
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status": "ok",
-		})
-	})
+	registerStartHook(mux, logger, "/single/checkstartresponse", "single")
+	registerCompletedHook(mux, logger, "/single/deductcalculate", "single")
 
 	server := &http.Server{
 		Addr:              addr,
@@ -78,6 +44,52 @@ func main() {
 		logger.Error("mock hook server failed", "error", err)
 		os.Exit(1)
 	}
+}
+
+func registerStartHook(mux *http.ServeMux, logger *slog.Logger, path string, mode string) {
+	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		body, _ := io.ReadAll(r.Body)
+
+		logger.Info(
+			"received start transaction hook",
+			"mode", mode,
+			"path", r.URL.Path,
+			"apiauthkey", r.Header.Get("apiauthkey"),
+			"body", string(body),
+		)
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"max_kwh": envFloat("MOCK_START_MAX_KWH", 7.5),
+		})
+	})
+}
+
+func registerCompletedHook(mux *http.ServeMux, logger *slog.Logger, path string, mode string) {
+	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		body, _ := io.ReadAll(r.Body)
+
+		logger.Info(
+			"received completed transaction hook",
+			"mode", mode,
+			"path", r.URL.Path,
+			"apiauthkey", r.Header.Get("apiauthkey"),
+			"body", string(body),
+		)
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "ok",
+		})
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

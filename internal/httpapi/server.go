@@ -209,10 +209,13 @@ func statusPayload(cp *state.ChargerState) map[string]any {
 
 type remoteStartRequest struct {
 	baseChargerRequest
-	IDTagSnake  string `json:"id_tag"`
-	IDTagCamel  string `json:"idTag"`
-	ConnectorID int    `json:"connector_id"`
-	ConnectorId int    `json:"connectorId"`
+	IDTagSnake         string `json:"id_tag"`
+	IDTagCamel         string `json:"idTag"`
+	ConnectorID        int    `json:"connector_id"`
+	ConnectorId        int    `json:"connectorId"`
+	IsSingleSession    bool   `json:"is_single_session"`
+	SingleSession      bool   `json:"single_session"`
+	SingleSessionCamel bool   `json:"isSingleSession"`
 }
 
 func (r remoteStartRequest) idTag() string {
@@ -227,6 +230,10 @@ func (r remoteStartRequest) connectorID() int {
 		return r.ConnectorID
 	}
 	return r.ConnectorId
+}
+
+func (r remoteStartRequest) isSingleSession() bool {
+	return r.IsSingleSession || r.SingleSession || r.SingleSessionCamel
 }
 
 func (s *Server) remoteStart(w http.ResponseWriter, r *http.Request) {
@@ -251,7 +258,7 @@ func (s *Server) remoteStart(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
 
-	status, err := s.hal.RemoteStartTransaction(ctx, chargerID, idTag, connectorID)
+	status, err := s.hal.RemoteStartTransactionWithOptions(ctx, chargerID, idTag, connectorID, req.isSingleSession())
 	if err != nil {
 		s.writeRemoteError(w, "remote start failed", chargerID, err)
 		return

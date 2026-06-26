@@ -490,7 +490,7 @@ func (h *HAL) OnStartTransaction(chargePointID string, request *core.StartTransa
 		ConnectorID:     request.ConnectorId,
 		MeterStart:      float64(request.MeterStart),
 		IDTag:           request.IdTag,
-		IsSingleSession: false,
+		IsSingleSession: h.consumePendingSingleSession(chargePointID, request.ConnectorId, request.IdTag),
 	})
 	if err != nil {
 		h.logger.Error("failed to create transaction", "charge_point_id", chargePointID, "error", err)
