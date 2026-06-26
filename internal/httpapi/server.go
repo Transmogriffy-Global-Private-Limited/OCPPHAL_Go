@@ -126,6 +126,10 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 		s.updateFirmware(w, r)
 	case "/api/trigger_message":
 		s.triggerMessage(w, r)
+	case "/api/charger_analytics":
+		s.chargerAnalytics(w, r)
+	case "/api/check_charger_inactivity":
+		s.checkChargerInactivity(w, r)
 	default:
 		writeJSON(w, http.StatusNotImplemented, map[string]any{
 			"error": "route not implemented yet in ocpp-go rewrite",
