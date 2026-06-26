@@ -32,6 +32,9 @@ type Config struct {
 
 	MainCMSCompletedTxnURL       string
 	SingleSessionCompletedTxnURL string
+
+	ChargerDataURL             string
+	ChargerDataCacheTTLSeconds int
 }
 
 func Load() Config {
@@ -59,6 +62,9 @@ func Load() Config {
 
 		MainCMSCompletedTxnURL:       env("MAIN_CMS_COMPLETED_TXN_URL", "https://be.cms.ocpp.transev.site/users/deductcalculate"),
 		SingleSessionCompletedTxnURL: os.Getenv("SINGLE_SESSION_COMPLETED_TXN_URL"),
+
+		ChargerDataURL:             os.Getenv("APICHARGERDATA"),
+		ChargerDataCacheTTLSeconds: envInt("CHARGER_DATA_CACHE_TTL_SECONDS", 7200),
 	}
 }
 
@@ -90,10 +96,12 @@ func envInt(key string, fallback int) int {
 	if raw == "" {
 		return fallback
 	}
+
 	value, err := strconv.Atoi(raw)
 	if err != nil {
 		return fallback
 	}
+
 	return value
 }
 

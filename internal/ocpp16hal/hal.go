@@ -41,6 +41,8 @@ func New(registry *state.Registry, txStore store.TransactionStore, hookSink Hook
 		logger:   logger,
 	}
 
+	h.cs.SetNewChargingStationValidationHandler(validateIncomingCharger)
+
 	h.cs.SetNewChargePointHandler(func(chargePoint ocpp16.ChargePointConnection) {
 		chargePointID := chargePoint.ID()
 
@@ -453,6 +455,7 @@ func (h *HAL) OnAuthorize(chargePointID string, request *core.AuthorizeRequest) 
 
 func (h *HAL) OnBootNotification(chargePointID string, request *core.BootNotificationRequest) (*core.BootNotificationConfirmation, error) {
 	h.registry.Touch(chargePointID)
+	h.scheduleRemoteOnlyConfigSync(chargePointID)
 
 	return core.NewBootNotificationConfirmation(
 		types.NewDateTime(time.Now().UTC()),

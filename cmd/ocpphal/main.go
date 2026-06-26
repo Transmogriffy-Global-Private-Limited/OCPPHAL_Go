@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Transmogriffy-Global-Private-Limited/OCPPHAL_Go/internal/chargerdir"
 	"github.com/Transmogriffy-Global-Private-Limited/OCPPHAL_Go/internal/config"
 	"github.com/Transmogriffy-Global-Private-Limited/OCPPHAL_Go/internal/hooks"
 	"github.com/Transmogriffy-Global-Private-Limited/OCPPHAL_Go/internal/httpapi"
@@ -24,6 +25,10 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: cfg.LogLevel,
 	}))
+
+	chargerDirectory := chargerdir.NewService(cfg, logger)
+	ocpp16hal.SetChargerDirectory(chargerDirectory, logger)
+	httpapi.SetChargerDirectory(chargerDirectory)
 
 	txStore := chooseTransactionStore(cfg, logger)
 

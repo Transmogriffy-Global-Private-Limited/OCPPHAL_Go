@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -23,6 +24,25 @@ func main() {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status": "ok",
 			"time":   time.Now().UTC().Format(time.RFC3339Nano),
+		})
+	})
+
+	mux.HandleFunc("/chargers", func(w http.ResponseWriter, r *http.Request) {
+		ids := envCSV("MOCK_CHARGER_IDS", []string{
+			"CP-SINGLE-001",
+			"CP-LIMIT-AUTO-001",
+			"CP-LIMIT-002",
+			"CP-HOOKS-002",
+			"CP-ANALYTICS-001",
+		})
+
+		data := make([]map[string]string, 0, len(ids))
+		for _, id := range ids {
+			data = append(data, map[string]string{"uid": id})
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"data": data,
 		})
 	})
 
@@ -118,4 +138,27 @@ func envFloat(key string, fallback float64) float64 {
 	}
 
 	return parsed
+}
+
+func envCSV(key string, fallback []string) []string {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+
+	if len(out) == 0 {
+		return fallback
+	}
+
+	return out
 }

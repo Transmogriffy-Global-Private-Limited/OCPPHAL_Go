@@ -167,6 +167,41 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.UID == "all" || req.UID == "all_online" {
+		knownIDs, err := knownChargerIDs(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "Error fetching charger data from API"})
+			return
+		}
+
+		if len(knownIDs) > 0 {
+			resp := make(map[string]any, len(knownIDs))
+
+			if req.UID == "all_online" {
+				for _, chargerID := range knownIDs {
+					cp, ok := s.registry.Snapshot(chargerID)
+					if !ok || !cp.Online {
+						continue
+					}
+					resp[chargerID] = legacyStatusPayload(cp, req.UID, chargerID)
+				}
+
+				writeJSON(w, http.StatusOK, resp)
+				return
+			}
+
+			for _, chargerID := range knownIDs {
+				cp, ok := s.registry.Snapshot(chargerID)
+				if ok {
+					resp[chargerID] = legacyStatusPayload(cp, req.UID, chargerID)
+				} else {
+					resp[chargerID] = legacyOfflineStatusPayload(req.UID, chargerID)
+				}
+			}
+
+			writeJSON(w, http.StatusOK, resp)
+			return
+		}
+
 		all := s.registry.SnapshotAll()
 		resp := make(map[string]any, len(all))
 
@@ -179,6 +214,17 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 		}
 
 		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
+	known, err := isKnownCharger(r.Context(), req.UID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "Error fetching charger data from API"})
+		return
+	}
+
+	if !known {
+		writeJSON(w, http.StatusNotFound, map[string]any{"detail": "Charger not found in the system"})
 		return
 	}
 
