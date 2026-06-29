@@ -220,6 +220,112 @@ is_single_session
 	return &tx, nil
 }
 
+func (s *PostgresStore) ForceCloseTransaction(ctx context.Context, input ForceCloseTransactionInput) (*Transaction, error) {
+	tx, err := s.GetByTransactionID(ctx, input.ChargerID, input.TransactionID)
+	if err != nil {
+		return nil, err
+	}
+
+	stopTime := time.Now().UTC()
+	total := DeltaWh(tx.MeterStart, input.MeterStop) / 1000.0
+
+	_, err = s.db.ExecContext(
+		ctx,
+		`UPDATE transactions
+ SET meter_stop = $1, total_consumption = $2, stop_time = $3
+ WHERE charger_id = $4
+   AND transaction_id = $5
+   AND stop_time IS NULL`,
+		input.MeterStop,
+		total,
+		stopTime,
+		input.ChargerID,
+		input.TransactionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	tx.MeterStop = &input.MeterStop
+	tx.TotalConsumption = &total
+	tx.StopTime = &stopTime
+
+	return tx, nil
+}
+
+func (s *PostgresStore) ListOpenTransactionsByCharger(ctx context.Context, chargerID string) ([]*Transaction, error) {
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT
+id,
+uuiddb,
+charger_id,
+connector_id,
+meter_start,
+meter_stop,
+total_consumption,
+start_time,
+stop_time,
+id_tag,
+transaction_id,
+is_single_session
+ FROM transactions
+ WHERE charger_id = $1
+   AND stop_time IS NULL
+   AND transaction_id IS NOT NULL
+ ORDER BY start_time DESC`,
+		chargerID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]*Transaction, 0)
+
+	for rows.Next() {
+		var tx Transaction
+		var meterStop sql.NullFloat64
+		var totalConsumption sql.NullFloat64
+		var stopTime sql.NullTime
+
+		if err := rows.Scan(
+			&tx.ID,
+			&tx.UUIDDB,
+			&tx.ChargerID,
+			&tx.ConnectorID,
+			&tx.MeterStart,
+			&meterStop,
+			&totalConsumption,
+			&tx.StartTime,
+			&stopTime,
+			&tx.IDTag,
+			&tx.TransactionID,
+			&tx.IsSingleSession,
+		); err != nil {
+			return nil, err
+		}
+
+		if meterStop.Valid {
+			tx.MeterStop = &meterStop.Float64
+		}
+		if totalConsumption.Valid {
+			tx.TotalConsumption = &totalConsumption.Float64
+		}
+		if stopTime.Valid {
+			tx.StopTime = &stopTime.Time
+		}
+
+		out = append(out, &tx)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return out, nil
+}
+
 func isDuplicate(err error) bool {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {

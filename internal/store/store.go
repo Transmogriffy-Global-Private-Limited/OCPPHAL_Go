@@ -43,6 +43,13 @@ type StopTransactionInput struct {
 	MeterStop     float64
 }
 
+type ForceCloseTransactionInput struct {
+	ChargerID     string
+	TransactionID int64
+	MeterStop     float64
+	Reason        string
+}
+
 type EnqueueCallbackInput struct {
 	Kind          string
 	DedupeKey     string
@@ -69,7 +76,9 @@ type TransactionStore interface {
 	CreateTransaction(ctx context.Context, input CreateTransactionInput) (*Transaction, error)
 	UpdateLiveMeter(ctx context.Context, input UpdateLiveMeterInput) (*Transaction, error)
 	StopTransaction(ctx context.Context, input StopTransactionInput) (*Transaction, error)
+	ForceCloseTransaction(ctx context.Context, input ForceCloseTransactionInput) (*Transaction, error)
 	GetByTransactionID(ctx context.Context, chargerID string, transactionID int64) (*Transaction, error)
+	ListOpenTransactionsByCharger(ctx context.Context, chargerID string) ([]*Transaction, error)
 	UpdateTransactionMaxKWh(ctx context.Context, transactionID int64, maxKWh float64) error
 	CheckAndMarkLimitStop(ctx context.Context, chargerID string, transactionID int64) (bool, error)
 

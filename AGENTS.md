@@ -94,6 +94,9 @@ These may exist in OCPP or ocpp-go, but they were not part of the confirmed acti
 - Single-session start and completed callbacks must use single-session hook URLs when configured.
 - Callback delivery must go through the durable outbox.
 - Remote-only/local-auth config enforcement must remain best-effort and non-fatal.
+- Duplicate charger connections must be generation-guarded: a stale disconnect from an older connection must not mark a newer active connection offline.
+- Boot/reconnect recovery must preserve open transaction truth: hydrate open DB sessions, recover ghost sessions conservatively, and use RemoteStop/Unlock retries without force-closing normal active sessions.
+- RemoteStartTransaction and RemoteStopTransaction acknowledgements must not create or finalize DB transactions by themselves; only charger-originated StartTransaction and StopTransaction should create/finalize normal sessions.
 
 ## Database expectations
 

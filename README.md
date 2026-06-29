@@ -15,6 +15,8 @@ The service replaces the legacy OCPP compatibility layer while preserving the ac
 - Max-kWh limit enforcement with automatic RemoteStopTransaction.
 - Charger directory validation from an external charger-data endpoint.
 - Remote-only authorization configuration sync for chargers.
+- Duplicate charger connection generation guard to prevent stale disconnects from marking a reconnected charger offline.
+- Boot-time open transaction recovery for charger reconnect/reboot scenarios.
 - Frontend WebSocket status snapshots.
 - Local smoke clients and regression scripts.
 
@@ -138,7 +140,7 @@ The regression script starts mockhooks and OCPPHAL locally, then verifies charge
 
 ## Deployment notes
 
-Deployment should be done with an explicit environment file, PostgreSQL smigrations, a systemd service, and a rollback plan to the previous production service.
+Deployment should be done with an explicit environment file, PostgreSQL migrations, a systemd service, and a rollback plan to the previous production service.
 
 Recommended deployment order:
 
@@ -166,3 +168,5 @@ Active parity covered:
 - Max-kWh automatic remote stop.
 - Charger directory validation.
 - Remote-only/local-auth configuration enforcement.
+- Duplicate connection stale-disconnect protection.
+- Boot recovery for open transaction hydration, ghost-session force-close, and RemoteStop/Unlock retry.

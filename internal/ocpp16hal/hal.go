@@ -25,43 +25,82 @@ type HookSink interface {
 }
 
 type HAL struct {
-	cs       ocpp16.CentralSystem
-	registry *state.Registry
-	store    store.TransactionStore
-	hooks    HookSink
-	logger   *slog.Logger
+	cs          ocpp16.CentralSystem
+	registry    *state.Registry
+	store       store.TransactionStore
+	hooks       HookSink
+	connections *connectionTracker
+	logger      *slog.Logger
 }
 
 func New(registry *state.Registry, txStore store.TransactionStore, hookSink HookSink, logger *slog.Logger) *HAL {
 	h := &HAL{
-		cs:       ocpp16.NewCentralSystem(nil, nil),
-		registry: registry,
-		store:    txStore,
-		hooks:    hookSink,
-		logger:   logger,
+		cs:          ocpp16.NewCentralSystem(nil, nil),
+		registry:    registry,
+		store:       txStore,
+		hooks:       hookSink,
+		connections: newConnectionTracker(),
+		logger:      logger,
 	}
 
 	h.cs.SetNewChargingStationValidationHandler(validateIncomingCharger)
 
 	h.cs.SetNewChargePointHandler(func(chargePoint ocpp16.ChargePointConnection) {
 		chargePointID := chargePoint.ID()
+		connKey := connectionKey(chargePoint)
 
-		h.logger.Info(
-			"charge point connected",
-			"charge_point_id", chargePointID,
-			"remote_addr", chargePoint.RemoteAddr(),
-		)
+		current, previous := h.connections.register(chargePointID, connKey, fmt.Sprint(chargePoint.RemoteAddr()))
+
+		if previous != nil {
+			h.logger.Warn(
+				"charge point reconnected; superseding previous connection",
+				"charge_point_id", chargePointID,
+				"previous_generation", previous.Generation,
+				"previous_remote_addr", previous.RemoteAddr,
+				"current_generation", current.Generation,
+				"current_remote_addr", current.RemoteAddr,
+			)
+		} else {
+			h.logger.Info(
+				"charge point connected",
+				"charge_point_id", chargePointID,
+				"remote_addr", chargePoint.RemoteAddr(),
+				"connection_generation", current.Generation,
+			)
+		}
 
 		h.registry.Touch(chargePointID)
 	})
 
 	h.cs.SetChargePointDisconnectedHandler(func(chargePoint ocpp16.ChargePointConnection) {
 		chargePointID := chargePoint.ID()
+		connKey := connectionKey(chargePoint)
+
+		isCurrent, current := h.connections.unregisterIfCurrent(chargePointID, connKey)
+		if !isCurrent {
+			if current != nil {
+				h.logger.Info(
+					"ignoring stale charge point disconnect",
+					"charge_point_id", chargePointID,
+					"remote_addr", chargePoint.RemoteAddr(),
+					"current_generation", current.Generation,
+					"current_remote_addr", current.RemoteAddr,
+				)
+			} else {
+				h.logger.Info(
+					"ignoring unknown charge point disconnect",
+					"charge_point_id", chargePointID,
+					"remote_addr", chargePoint.RemoteAddr(),
+				)
+			}
+			return
+		}
 
 		h.logger.Info(
 			"charge point disconnected",
 			"charge_point_id", chargePointID,
 			"remote_addr", chargePoint.RemoteAddr(),
+			"connection_generation", current.Generation,
 		)
 
 		h.registry.MarkOffline(chargePointID)
@@ -456,6 +495,7 @@ func (h *HAL) OnAuthorize(chargePointID string, request *core.AuthorizeRequest) 
 func (h *HAL) OnBootNotification(chargePointID string, request *core.BootNotificationRequest) (*core.BootNotificationConfirmation, error) {
 	h.registry.Touch(chargePointID)
 	h.scheduleRemoteOnlyConfigSync(chargePointID)
+	h.scheduleBootRecovery(chargePointID)
 
 	return core.NewBootNotificationConfirmation(
 		types.NewDateTime(time.Now().UTC()),

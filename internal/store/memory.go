@@ -117,6 +117,37 @@ func (s *MemoryStore) GetByTransactionID(ctx context.Context, chargerID string, 
 	return cloneTransaction(tx), nil
 }
 
+func (s *MemoryStore) ForceCloseTransaction(ctx context.Context, input ForceCloseTransactionInput) (*Transaction, error) {
+	return s.StopTransaction(ctx, StopTransactionInput{
+		ChargerID:     input.ChargerID,
+		TransactionID: input.TransactionID,
+		MeterStop:     input.MeterStop,
+	})
+}
+
+func (s *MemoryStore) ListOpenTransactionsByCharger(ctx context.Context, chargerID string) ([]*Transaction, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	out := make([]*Transaction, 0)
+
+	for _, tx := range s.transactions {
+		if tx == nil {
+			continue
+		}
+		if tx.ChargerID != chargerID {
+			continue
+		}
+		if tx.StopTime != nil {
+			continue
+		}
+
+		out = append(out, cloneTransaction(tx))
+	}
+
+	return out, nil
+}
+
 func cloneTransaction(tx *Transaction) *Transaction {
 	if tx == nil {
 		return nil
