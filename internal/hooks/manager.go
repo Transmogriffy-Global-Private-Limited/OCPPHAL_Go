@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -254,20 +256,13 @@ func (m *Manager) postTask(ctx context.Context, task store.CallbackTask) (postRe
 	}
 
 	if task.Kind == KindStartTransaction {
-		var parsed struct {
-			MaxKWh *float64 `json:"max_kwh"`
-		}
-
-		if err := json.Unmarshal(respBody, &parsed); err != nil {
-			return postResult{fatal: "invalid JSON response: " + err.Error()}, nil
-		}
-
-		if parsed.MaxKWh == nil {
-			return postResult{fatal: "missing max_kwh in response: " + string(respBody)}, nil
+		maxKWh, err := parseMaxKWhResponse(respBody)
+		if err != nil {
+			return postResult{fatal: err.Error()}, nil
 		}
 
 		if task.TransactionID != nil {
-			if err := m.store.UpdateTransactionMaxKWh(ctx, *task.TransactionID, *parsed.MaxKWh); err != nil {
+			if err := m.store.UpdateTransactionMaxKWh(ctx, *task.TransactionID, maxKWh); err != nil {
 				return postResult{}, err
 			}
 
@@ -279,6 +274,45 @@ func (m *Manager) postTask(ctx context.Context, task store.CallbackTask) (postRe
 	}
 
 	return postResult{}, nil
+}
+
+type flexibleFloat64 float64
+
+func (f *flexibleFloat64) UnmarshalJSON(data []byte) error {
+	raw := strings.TrimSpace(string(data))
+	if strings.HasPrefix(raw, `"`) {
+		var value string
+		if err := json.Unmarshal(data, &value); err != nil {
+			return err
+		}
+		raw = strings.TrimSpace(value)
+	}
+
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return fmt.Errorf("invalid decimal %q: %w", raw, err)
+	}
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return fmt.Errorf("invalid non-finite decimal %q", raw)
+	}
+
+	*f = flexibleFloat64(value)
+	return nil
+}
+
+func parseMaxKWhResponse(respBody []byte) (float64, error) {
+	var parsed struct {
+		MaxKWh *flexibleFloat64 `json:"max_kwh"`
+	}
+
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return 0, errors.New("invalid JSON response: " + err.Error())
+	}
+	if parsed.MaxKWh == nil {
+		return 0, errors.New("missing max_kwh in response: " + string(respBody))
+	}
+
+	return float64(*parsed.MaxKWh), nil
 }
 
 func extractChargerID(payload json.RawMessage) string {
