@@ -13,8 +13,10 @@ $goFiles = @(
 gofmt -w $goFiles
 go mod tidy
 go test ./...
-go build -o ".\bin\ocpphal.exe" ".\cmd\ocpphal"
-go build -o ".\bin\cpsmoke.exe" ".\cmd\cpsmoke"
+New-Item -ItemType Directory -Force -Path ".\builds" | Out-Null
 
-Get-Item ".\bin\ocpphal.exe", ".\bin\cpsmoke.exe" |
+go build -o ".\builds\ocpphal.exe" ".\cmd\ocpphal"
+go build -o ".\builds\cpsmoke.exe" ".\cmd\cpsmoke"
+
+Get-Item ".\builds\ocpphal.exe", ".\builds\cpsmoke.exe" |
     Select-Object FullName, Length, LastWriteTime

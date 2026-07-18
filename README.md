@@ -113,12 +113,12 @@ Example:
 
 This builds:
 
-- bin/ocpphal.exe
-- bin/mockhooks.exe
-- bin/cpsmoke.exe
-- bin/cplimitsmoke.exe
-- bin/cpsinglesmoke.exe
-- bin/frontendwssmoke.exe
+- builds/ocpphal.exe
+- builds/mockhooks.exe
+- builds/cpsmoke.exe
+- builds/cplimitsmoke.exe
+- builds/cpsinglesmoke.exe
+- builds/frontendwssmoke.exe
 
 ## Local regression
 
@@ -132,7 +132,7 @@ The regression script starts mockhooks and OCPPHAL locally, then verifies charge
 
 ## Local development notes
 
-- Do not commit generated binaries from bin/.
+- Do not commit generated binaries from builds/.
 - Do not commit local review/audit workspaces such as _review/, _parity/, or _git_review/.
 - Keep .env and real secrets out of Git.
 - Use .env.example for configuration reference only.

@@ -26,7 +26,7 @@ go test ./...
 Write-Host ""
 Write-Host "===== build binaries ====="
 
-New-Item -ItemType Directory -Force -Path ".\bin" | Out-Null
+New-Item -ItemType Directory -Force -Path ".\builds" | Out-Null
 
 $targets = @(
     @{ Name = "ocpphal";         Path = ".\cmd\ocpphal" },
@@ -38,7 +38,7 @@ $targets = @(
 )
 
 foreach ($target in $targets) {
-    $out = ".\bin\$($target.Name).exe"
+    $out = ".\builds\$($target.Name).exe"
     Write-Host "Building $out"
     go build -o $out $target.Path
 }
@@ -46,6 +46,6 @@ foreach ($target in $targets) {
 Write-Host ""
 Write-Host "===== build complete ====="
 
-Get-ChildItem ".\bin" -Filter "*.exe" |
+Get-ChildItem ".\builds" -Filter "*.exe" |
     Select-Object FullName, Length, LastWriteTime |
     Format-Table -AutoSize

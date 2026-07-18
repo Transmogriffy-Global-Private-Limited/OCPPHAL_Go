@@ -144,7 +144,7 @@ try {
         MOCK_HOOK_ADDR      = "127.0.0.1:19090"
         MOCK_START_MAX_KWH  = "7.5"
         MOCK_CHARGER_IDS    = $chargerIDs
-    } -CommandPath ".\bin\mockhooks.exe"
+    } -CommandPath ".\builds\mockhooks.exe"
 
     Wait-HttpOk -Url "http://127.0.0.1:19090/health" -TimeoutSeconds 20
 
@@ -177,7 +177,7 @@ try {
 
         SINGLE_SESSION_START_TXN_HOOK_URL = "http://127.0.0.1:19090/single/checkstartresponse"
         SINGLE_SESSION_COMPLETED_TXN_URL  = "http://127.0.0.1:19090/single/deductcalculate"
-    } -CommandPath ".\bin\ocpphal.exe"
+    } -CommandPath ".\builds\ocpphal.exe"
 
     Wait-HttpOk -Url "http://127.0.0.1:18080/api/hello" -TimeoutSeconds 20
 
@@ -211,22 +211,22 @@ try {
         throw "Unknown charger status unexpectedly succeeded"
     }
 
-    Run-SmokeExe -Name "core smoke" -ClientID "CP-REG-CORE-001" -Exe ".\bin\cpsmoke.exe"
+    Run-SmokeExe -Name "core smoke" -ClientID "CP-REG-CORE-001" -Exe ".\builds\cpsmoke.exe"
 
-    Run-SmokeExe -Name "single-session smoke" -ClientID "CP-REG-SINGLE-001" -Exe ".\bin\cpsinglesmoke.exe"
+    Run-SmokeExe -Name "single-session smoke" -ClientID "CP-REG-SINGLE-001" -Exe ".\builds\cpsinglesmoke.exe"
 
     Write-Host ""
     Write-Host "===== frontend websocket smoke ====="
 
     $env:FRONTEND_WS_URL = "ws://127.0.0.1:18080/frontend/ws/CP-REG-SINGLE-001"
-    & ".\bin\frontendwssmoke.exe"
+    & ".\builds\frontendwssmoke.exe"
 
     Write-Host ""
     Write-Host "===== unknown charger WS rejection smoke ====="
 
     $unknownWsFailed = $false
     try {
-        Run-SmokeExe -Name "unknown charger smoke" -ClientID "CP-NOT-IN-ENDPOINT" -Exe ".\bin\cpsinglesmoke.exe"
+        Run-SmokeExe -Name "unknown charger smoke" -ClientID "CP-NOT-IN-ENDPOINT" -Exe ".\builds\cpsinglesmoke.exe"
     }
     catch {
         $unknownWsFailed = $true
@@ -248,11 +248,11 @@ try {
         MOCK_HOOK_ADDR      = "127.0.0.1:19090"
         MOCK_START_MAX_KWH  = "1.0"
         MOCK_CHARGER_IDS    = $chargerIDs
-    } -CommandPath ".\bin\mockhooks.exe"
+    } -CommandPath ".\builds\mockhooks.exe"
 
     Wait-HttpOk -Url "http://127.0.0.1:19090/health" -TimeoutSeconds 20
 
-    Run-SmokeExe -Name "pure auto-stop smoke" -ClientID "CP-REG-LIMIT-001" -Exe ".\bin\cplimitsmoke.exe"
+    Run-SmokeExe -Name "pure auto-stop smoke" -ClientID "CP-REG-LIMIT-001" -Exe ".\builds\cplimitsmoke.exe"
 
     Write-Host ""
     Write-Host "===== waiting for outbox worker ====="
@@ -284,5 +284,4 @@ finally {
     Stop-RepoJob -Job $serverJob
     Stop-RepoJob -Job $mockJob
 }
-
 

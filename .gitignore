@@ -5,6 +5,7 @@
 
 # Build outputs
 bin/
+builds/
 *.exe
 *.dll
 *.so

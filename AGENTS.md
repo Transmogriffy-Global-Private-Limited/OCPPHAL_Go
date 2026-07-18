@@ -13,7 +13,7 @@ The service owns charger communication, CMS-facing REST compatibility APIs, tran
 1. Do not manually reimplement OCPP protocol framing when ocpp-go already provides the capability.
 2. Preserve compatibility with the active old REST and WebSocket surface.
 3. Do not add speculative endpoints just because a library supports them.
-4. Do not commit generated binaries from bin/.
+4. Do not commit generated binaries from builds/.
 5. Do not commit local workspaces such as _review/, _parity/, or _git_review/.
 6. Do not commit .env or real secrets.
 7. Do not change callback payload shapes casually. They are compatibility contracts.
