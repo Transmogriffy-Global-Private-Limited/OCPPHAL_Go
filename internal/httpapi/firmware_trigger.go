@@ -8,11 +8,11 @@ import (
 
 type getDiagnosticsRequest struct {
 	baseChargerRequest
-	Location      string `json:"location"`
-	StartTime     string `json:"start_time"`
-	StopTime      string `json:"stop_time"`
-	Retries       *int   `json:"retries"`
-	RetryInterval *int   `json:"retry_interval"`
+	Location      string       `json:"location"`
+	StartTime     string       `json:"start_time"`
+	StopTime      string       `json:"stop_time"`
+	Retries       *flexibleInt `json:"retries"`
+	RetryInterval *flexibleInt `json:"retry_interval"`
 }
 
 func (s *Server) getDiagnostics(w http.ResponseWriter, r *http.Request) {
@@ -40,8 +40,8 @@ func (s *Server) getDiagnostics(w http.ResponseWriter, r *http.Request) {
 		req.Location,
 		req.StartTime,
 		req.StopTime,
-		req.Retries,
-		req.RetryInterval,
+		flexibleIntPtr(req.Retries),
+		flexibleIntPtr(req.RetryInterval),
 	)
 	if err != nil {
 		s.writeRemoteError(w, "get diagnostics failed", chargerID, err)
@@ -56,10 +56,10 @@ func (s *Server) getDiagnostics(w http.ResponseWriter, r *http.Request) {
 
 type updateFirmwareRequest struct {
 	baseChargerRequest
-	Location      string `json:"location"`
-	RetrieveDate  string `json:"retrieve_date"`
-	Retries       *int   `json:"retries"`
-	RetryInterval *int   `json:"retry_interval"`
+	Location      string       `json:"location"`
+	RetrieveDate  string       `json:"retrieve_date"`
+	Retries       *flexibleInt `json:"retries"`
+	RetryInterval *flexibleInt `json:"retry_interval"`
 }
 
 func (s *Server) updateFirmware(w http.ResponseWriter, r *http.Request) {
@@ -90,8 +90,8 @@ func (s *Server) updateFirmware(w http.ResponseWriter, r *http.Request) {
 		chargerID,
 		req.Location,
 		req.RetrieveDate,
-		req.Retries,
-		req.RetryInterval,
+		flexibleIntPtr(req.Retries),
+		flexibleIntPtr(req.RetryInterval),
 	); err != nil {
 		s.writeRemoteError(w, "update firmware failed", chargerID, err)
 		return
@@ -102,16 +102,16 @@ func (s *Server) updateFirmware(w http.ResponseWriter, r *http.Request) {
 
 type triggerMessageRequest struct {
 	baseChargerRequest
-	RequestedMessage string `json:"requested_message"`
-	ConnectorID      int    `json:"connector_id"`
-	ConnectorId      int    `json:"connectorId"`
+	RequestedMessage string      `json:"requested_message"`
+	ConnectorID      flexibleInt `json:"connector_id"`
+	ConnectorId      flexibleInt `json:"connectorId"`
 }
 
 func (r triggerMessageRequest) connectorID() int {
 	if r.ConnectorID > 0 {
-		return r.ConnectorID
+		return int(r.ConnectorID)
 	}
-	return r.ConnectorId
+	return int(r.ConnectorId)
 }
 
 func (s *Server) triggerMessage(w http.ResponseWriter, r *http.Request) {

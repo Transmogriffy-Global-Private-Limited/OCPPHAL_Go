@@ -259,13 +259,13 @@ func statusPayload(cp *state.ChargerState) map[string]any {
 
 type remoteStartRequest struct {
 	baseChargerRequest
-	IDTagSnake         string `json:"id_tag"`
-	IDTagCamel         string `json:"idTag"`
-	ConnectorID        int    `json:"connector_id"`
-	ConnectorId        int    `json:"connectorId"`
-	IsSingleSession    bool   `json:"is_single_session"`
-	SingleSession      bool   `json:"single_session"`
-	SingleSessionCamel bool   `json:"isSingleSession"`
+	IDTagSnake         string       `json:"id_tag"`
+	IDTagCamel         string       `json:"idTag"`
+	ConnectorID        flexibleInt  `json:"connector_id"`
+	ConnectorId        flexibleInt  `json:"connectorId"`
+	IsSingleSession    flexibleBool `json:"is_single_session"`
+	SingleSession      flexibleBool `json:"single_session"`
+	SingleSessionCamel flexibleBool `json:"isSingleSession"`
 }
 
 func (r remoteStartRequest) idTag() string {
@@ -277,13 +277,13 @@ func (r remoteStartRequest) idTag() string {
 
 func (r remoteStartRequest) connectorID() int {
 	if r.ConnectorID > 0 {
-		return r.ConnectorID
+		return int(r.ConnectorID)
 	}
-	return r.ConnectorId
+	return int(r.ConnectorId)
 }
 
 func (r remoteStartRequest) isSingleSession() bool {
-	return r.IsSingleSession || r.SingleSession || r.SingleSessionCamel
+	return bool(r.IsSingleSession) || bool(r.SingleSession) || bool(r.SingleSessionCamel)
 }
 
 func (s *Server) remoteStart(w http.ResponseWriter, r *http.Request) {
@@ -319,15 +319,15 @@ func (s *Server) remoteStart(w http.ResponseWriter, r *http.Request) {
 
 type remoteStopRequest struct {
 	baseChargerRequest
-	TransactionID int `json:"transaction_id"`
-	TransactionId int `json:"transactionId"`
+	TransactionID flexibleInt `json:"transaction_id"`
+	TransactionId flexibleInt `json:"transactionId"`
 }
 
 func (r remoteStopRequest) transactionID() int {
 	if r.TransactionID > 0 {
-		return r.TransactionID
+		return int(r.TransactionID)
 	}
-	return r.TransactionId
+	return int(r.TransactionId)
 }
 
 func (s *Server) remoteStop(w http.ResponseWriter, r *http.Request) {
@@ -362,17 +362,17 @@ func (s *Server) remoteStop(w http.ResponseWriter, r *http.Request) {
 
 type changeAvailabilityRequest struct {
 	baseChargerRequest
-	ConnectorID      int    `json:"connector_id"`
-	ConnectorId      int    `json:"connectorId"`
-	Type             string `json:"type"`
-	AvailabilityType string `json:"availability_type"`
+	ConnectorID      flexibleInt `json:"connector_id"`
+	ConnectorId      flexibleInt `json:"connectorId"`
+	Type             string      `json:"type"`
+	AvailabilityType string      `json:"availability_type"`
 }
 
 func (r changeAvailabilityRequest) connectorID() int {
 	if r.ConnectorID > 0 {
-		return r.ConnectorID
+		return int(r.ConnectorID)
 	}
-	return r.ConnectorId
+	return int(r.ConnectorId)
 }
 
 func (r changeAvailabilityRequest) availabilityType() string {
@@ -466,15 +466,15 @@ func (s *Server) clearCache(w http.ResponseWriter, r *http.Request) {
 
 type unlockConnectorRequest struct {
 	baseChargerRequest
-	ConnectorID int `json:"connector_id"`
-	ConnectorId int `json:"connectorId"`
+	ConnectorID flexibleInt `json:"connector_id"`
+	ConnectorId flexibleInt `json:"connectorId"`
 }
 
 func (r unlockConnectorRequest) connectorID() int {
 	if r.ConnectorID > 0 {
-		return r.ConnectorID
+		return int(r.ConnectorID)
 	}
-	return r.ConnectorId
+	return int(r.ConnectorId)
 }
 
 func (s *Server) unlockConnector(w http.ResponseWriter, r *http.Request) {
