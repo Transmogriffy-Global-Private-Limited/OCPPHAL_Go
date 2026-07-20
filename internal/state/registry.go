@@ -193,6 +193,23 @@ func (r *Registry) FindConnectorByTransactionID(chargerID string, transactionID 
 	return 0, false
 }
 
+func (r *Registry) TransactionIDForConnector(chargerID string, connectorID int) (int64, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	cp := r.chargers[chargerID]
+	if cp == nil {
+		return 0, false
+	}
+
+	conn, ok := cp.Connectors[connectorKey(connectorID)]
+	if !ok || conn.TransactionID == nil {
+		return 0, false
+	}
+
+	return *conn.TransactionID, true
+}
+
 func (r *Registry) Snapshot(chargerID string) (*ChargerState, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

@@ -79,8 +79,11 @@ type TransactionStore interface {
 	ForceCloseTransaction(ctx context.Context, input ForceCloseTransactionInput) (*Transaction, error)
 	GetByTransactionID(ctx context.Context, chargerID string, transactionID int64) (*Transaction, error)
 	ListOpenTransactionsByCharger(ctx context.Context, chargerID string) ([]*Transaction, error)
+	ListTransactionsMissingStartCallbacks(ctx context.Context, limit int) ([]*Transaction, error)
+	ListTransactionsMissingCompletedCallbacks(ctx context.Context, limit int) ([]*Transaction, error)
 	UpdateTransactionMaxKWh(ctx context.Context, transactionID int64, maxKWh float64) error
 	CheckAndMarkLimitStop(ctx context.Context, chargerID string, transactionID int64) (bool, error)
+	ReleaseLimitStopRequest(ctx context.Context, chargerID string, transactionID int64) error
 
 	ChargerAnalytics(ctx context.Context, input AnalyticsInput) (*AnalyticsOutput, error)
 

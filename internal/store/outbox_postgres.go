@@ -54,8 +54,8 @@ func (s *PostgresStore) ClaimDueCallbacks(ctx context.Context, limit int) ([]Cal
 		ctx,
 		`SELECT id, kind, dedupe_key, transaction_id, uuiddb, target_url, payload, retries, max_retries
  FROM callback_outbox
- WHERE status = 'pending'
-   AND next_retry_at <= NOW()
+ WHERE (status = 'pending' AND next_retry_at <= NOW())
+    OR (status = 'processing' AND updated_at <= NOW() - INTERVAL '2 minutes')
  ORDER BY id
  LIMIT $1
  FOR UPDATE SKIP LOCKED`,

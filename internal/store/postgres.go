@@ -136,15 +136,20 @@ func (s *PostgresStore) StopTransaction(ctx context.Context, input StopTransacti
 	if err != nil {
 		return nil, err
 	}
+	if tx.StopTime != nil {
+		return tx, nil
+	}
 
 	stopTime := time.Now().UTC()
 	total := DeltaWh(tx.MeterStart, input.MeterStop) / 1000.0
 
-	_, err = s.db.ExecContext(
+	result, err := s.db.ExecContext(
 		ctx,
 		`UPDATE transactions
  SET meter_stop = $1, total_consumption = $2, stop_time = $3
- WHERE charger_id = $4 AND transaction_id = $5`,
+ WHERE charger_id = $4
+   AND transaction_id = $5
+   AND stop_time IS NULL`,
 		input.MeterStop,
 		total,
 		stopTime,
@@ -153,6 +158,13 @@ func (s *PostgresStore) StopTransaction(ctx context.Context, input StopTransacti
 	)
 	if err != nil {
 		return nil, err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if rowsAffected == 0 {
+		return s.GetByTransactionID(ctx, input.ChargerID, input.TransactionID)
 	}
 
 	tx.MeterStop = &input.MeterStop

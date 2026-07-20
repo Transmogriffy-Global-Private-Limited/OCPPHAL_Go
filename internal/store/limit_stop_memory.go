@@ -11,6 +11,10 @@ func (s *MemoryStore) CheckAndMarkLimitStop(ctx context.Context, chargerID strin
 		return false, nil
 	}
 
+	if tx.StopTime != nil {
+		return false, nil
+	}
+
 	if tx.LimitStopRequested {
 		return false, nil
 	}
@@ -25,4 +29,16 @@ func (s *MemoryStore) CheckAndMarkLimitStop(ctx context.Context, chargerID strin
 
 	tx.LimitStopRequested = true
 	return true, nil
+}
+
+func (s *MemoryStore) ReleaseLimitStopRequest(ctx context.Context, chargerID string, transactionID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx := s.transactions[transactionID]
+	if tx != nil && tx.ChargerID == chargerID && tx.StopTime == nil {
+		tx.LimitStopRequested = false
+	}
+
+	return nil
 }

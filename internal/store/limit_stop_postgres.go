@@ -14,6 +14,7 @@ func (s *PostgresStore) CheckAndMarkLimitStop(ctx context.Context, chargerID str
  SET limit_stop_requested = TRUE
  WHERE charger_id = $1
    AND transaction_id = $2
+   AND stop_time IS NULL
    AND limit_stop_requested = FALSE
    AND max_kwh IS NOT NULL
    AND total_consumption IS NOT NULL
@@ -31,4 +32,18 @@ func (s *PostgresStore) CheckAndMarkLimitStop(ctx context.Context, chargerID str
 	}
 
 	return true, nil
+}
+
+func (s *PostgresStore) ReleaseLimitStopRequest(ctx context.Context, chargerID string, transactionID int64) error {
+	_, err := s.db.ExecContext(
+		ctx,
+		`UPDATE transactions
+ SET limit_stop_requested = FALSE
+ WHERE charger_id = $1
+   AND transaction_id = $2
+   AND stop_time IS NULL`,
+		chargerID,
+		transactionID,
+	)
+	return err
 }

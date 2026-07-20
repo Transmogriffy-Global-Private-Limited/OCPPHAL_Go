@@ -528,6 +528,51 @@ func (h *HAL) OnStatusNotification(chargePointID string, request *core.StatusNot
 func (h *HAL) OnStartTransaction(chargePointID string, request *core.StartTransactionRequest) (*core.StartTransactionConfirmation, error) {
 	h.registry.Touch(chargePointID)
 
+	openTransactions, err := h.store.ListOpenTransactionsByCharger(context.Background(), chargePointID)
+	if err != nil {
+		h.logger.Error("failed to check existing transactions", "charge_point_id", chargePointID, "error", err)
+		return nil, fmt.Errorf("check existing transactions: %w", err)
+	}
+
+	for _, existing := range openTransactions {
+		if existing == nil || existing.ConnectorID != request.ConnectorId {
+			continue
+		}
+
+		sameStart := existing.IDTag == request.IdTag &&
+			existing.MeterStart == float64(request.MeterStart)
+		if !sameStart {
+			h.logger.Warn(
+				"rejecting overlapping transaction on connector",
+				"charge_point_id", chargePointID,
+				"connector_id", request.ConnectorId,
+				"existing_transaction_id", existing.TransactionID,
+			)
+			return core.NewStartTransactionConfirmation(
+				types.NewIdTagInfo(types.AuthorizationStatusBlocked),
+				0,
+			), nil
+		}
+
+		h.registry.ApplyStartTransaction(
+			chargePointID,
+			request.ConnectorId,
+			existing.TransactionID,
+			float64(request.MeterStart),
+		)
+
+		if h.hooks != nil {
+			if err := h.hooks.EnqueueStartTransaction(context.Background(), existing); err != nil {
+				return nil, fmt.Errorf("enqueue retried start transaction callback: %w", err)
+			}
+		}
+
+		return core.NewStartTransactionConfirmation(
+			types.NewIdTagInfo(types.AuthorizationStatusAccepted),
+			int(existing.TransactionID),
+		), nil
+	}
+
 	tx, err := h.store.CreateTransaction(context.Background(), store.CreateTransactionInput{
 		ChargerID:       chargePointID,
 		ConnectorID:     request.ConnectorId,
@@ -549,7 +594,8 @@ func (h *HAL) OnStartTransaction(chargePointID string, request *core.StartTransa
 
 	if h.hooks != nil {
 		if err := h.hooks.EnqueueStartTransaction(context.Background(), tx); err != nil {
-			h.logger.Warn("failed to enqueue start transaction hook", "charge_point_id", chargePointID, "transaction_id", tx.TransactionID, "error", err)
+			h.logger.Error("failed to enqueue start transaction hook", "charge_point_id", chargePointID, "transaction_id", tx.TransactionID, "error", err)
+			return nil, fmt.Errorf("enqueue start transaction callback: %w", err)
 		}
 	}
 
@@ -568,6 +614,8 @@ func (h *HAL) OnMeterValues(chargePointID string, request *core.MeterValuesReque
 
 		if request.TransactionId != nil && *request.TransactionId > 0 {
 			v := int64(*request.TransactionId)
+			txID64 = &v
+		} else if v, found := h.registry.TransactionIDForConnector(chargePointID, request.ConnectorId); found {
 			txID64 = &v
 		}
 
@@ -611,21 +659,17 @@ func (h *HAL) OnStopTransaction(chargePointID string, request *core.StopTransact
 			"transaction_id", txID,
 			"error", err,
 		)
-
-		if connectorID, ok := h.registry.FindConnectorByTransactionID(chargePointID, txID); ok {
-			h.registry.ApplyStopTransaction(chargePointID, connectorID, float64(request.MeterStop))
-		}
-
-		return core.NewStopTransactionConfirmation(), nil
+		return nil, fmt.Errorf("persist stop transaction: %w", err)
 	}
-
-	h.registry.ApplyStopTransaction(chargePointID, tx.ConnectorID, float64(request.MeterStop))
 
 	if h.hooks != nil {
 		if err := h.hooks.EnqueueCompletedTransaction(context.Background(), tx); err != nil {
-			h.logger.Warn("failed to enqueue completed transaction hook", "charge_point_id", chargePointID, "transaction_id", tx.TransactionID, "error", err)
+			h.logger.Error("failed to enqueue completed transaction hook", "charge_point_id", chargePointID, "transaction_id", tx.TransactionID, "error", err)
+			return nil, fmt.Errorf("enqueue completed transaction callback: %w", err)
 		}
 	}
+
+	h.registry.ApplyStopTransaction(chargePointID, tx.ConnectorID, float64(request.MeterStop))
 
 	return core.NewStopTransactionConfirmation(), nil
 }

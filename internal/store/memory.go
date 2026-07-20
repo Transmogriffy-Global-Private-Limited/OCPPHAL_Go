@@ -95,6 +95,10 @@ func (s *MemoryStore) StopTransaction(ctx context.Context, input StopTransaction
 		return nil, errors.New("transaction not found")
 	}
 
+	if tx.StopTime != nil {
+		return cloneTransaction(tx), nil
+	}
+
 	now := time.Now().UTC()
 	tx.MeterStop = floatPtr(input.MeterStop)
 

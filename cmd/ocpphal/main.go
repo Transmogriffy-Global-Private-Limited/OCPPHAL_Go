@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -30,7 +31,11 @@ func main() {
 	ocpp16hal.SetChargerDirectory(chargerDirectory, logger)
 	httpapi.SetChargerDirectory(chargerDirectory)
 
-	txStore := chooseTransactionStore(cfg, logger)
+	txStore, err := chooseTransactionStore(cfg, logger)
+	if err != nil {
+		logger.Error("failed to initialize transaction store", "error", err)
+		os.Exit(1)
+	}
 
 	hookManager := hooks.NewManager(cfg, txStore, logger)
 	hookManager.Start()
@@ -91,18 +96,17 @@ func main() {
 	logger.Info("shutdown complete")
 }
 
-func chooseTransactionStore(cfg config.Config, logger *slog.Logger) store.TransactionStore {
+func chooseTransactionStore(cfg config.Config, logger *slog.Logger) (store.TransactionStore, error) {
 	if cfg.HasDatabase() {
 		pgStore, err := store.NewPostgresStore(cfg)
 		if err == nil {
 			logger.Info("using PostgreSQL transaction store", "db_host", cfg.DBHost, "db_name", cfg.DBName)
-			return pgStore
+			return pgStore, nil
 		}
 
-		logger.Warn("failed to connect PostgreSQL; using in-memory store", "error", err)
-		return store.NewMemoryStore()
+		return nil, fmt.Errorf("connect PostgreSQL: %w", err)
 	}
 
 	logger.Warn("DB env not configured; using in-memory store")
-	return store.NewMemoryStore()
+	return store.NewMemoryStore(), nil
 }

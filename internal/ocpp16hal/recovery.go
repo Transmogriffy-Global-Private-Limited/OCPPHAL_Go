@@ -23,6 +23,20 @@ func (h *HAL) scheduleBootRecovery(chargerID string) {
 		return
 	}
 
+	listCtx, listCancel := context.WithTimeout(context.Background(), bootRecoveryCallTimeout)
+	openTxs, err := h.store.ListOpenTransactionsByCharger(listCtx, chargerID)
+	listCancel()
+	if err != nil {
+		bootRecoveryRunning.Delete(chargerID)
+		h.logger.Warn("failed to snapshot open transactions for boot recovery", "charge_point_id", chargerID, "error", err)
+		return
+	}
+	if len(openTxs) == 0 {
+		bootRecoveryRunning.Delete(chargerID)
+		h.logger.Info("boot recovery found no pre-existing open transactions", "charge_point_id", chargerID)
+		return
+	}
+
 	go func() {
 		defer bootRecoveryRunning.Delete(chargerID)
 
@@ -31,30 +45,36 @@ func (h *HAL) scheduleBootRecovery(chargerID string) {
 		ctx, cancel := context.WithTimeout(context.Background(), bootRecoveryMaxRuntime)
 		defer cancel()
 
-		h.recoverOpenTransactions(ctx, chargerID)
+		h.recoverOpenTransactions(ctx, chargerID, openTxs)
 	}()
 }
 
-func (h *HAL) recoverOpenTransactions(ctx context.Context, chargerID string) {
-	openTxs, err := h.store.ListOpenTransactionsByCharger(ctx, chargerID)
-	if err != nil {
-		h.logger.Warn("failed to list open transactions for boot recovery", "charge_point_id", chargerID, "error", err)
-		return
-	}
-
-	if len(openTxs) == 0 {
-		h.logger.Info("boot recovery found no open transactions", "charge_point_id", chargerID)
-		return
-	}
-
+func (h *HAL) recoverOpenTransactions(ctx context.Context, chargerID string, bootOpenTxs []*store.Transaction) {
 	h.logger.Warn(
-		"boot recovery found open transactions",
+		"boot recovery found pre-existing open transactions",
 		"charge_point_id", chargerID,
-		"open_transaction_count", len(openTxs),
+		"open_transaction_count", len(bootOpenTxs),
 	)
 
-	for _, tx := range openTxs {
+	for _, bootTx := range bootOpenTxs {
+		if bootTx == nil {
+			continue
+		}
+
+		tx, err := h.store.GetByTransactionID(ctx, chargerID, bootTx.TransactionID)
+		if err != nil {
+			h.logger.Warn(
+				"failed to refresh boot recovery transaction",
+				"charge_point_id", chargerID,
+				"transaction_id", bootTx.TransactionID,
+				"error", err,
+			)
+			continue
+		}
 		if tx == nil {
+			continue
+		}
+		if tx.StopTime != nil {
 			continue
 		}
 

@@ -79,7 +79,7 @@ func (m *Manager) EnqueueStartTransaction(ctx context.Context, tx *store.Transac
 	}
 
 	payload := map[string]any{
-		"transactionid":     tx.TransactionID,
+		"transactionid":     strconv.FormatInt(tx.TransactionID, 10),
 		"userid":            tx.IDTag,
 		"chargerid":         tx.ChargerID,
 		"connectorid":       strconv.Itoa(tx.ConnectorID),
@@ -114,7 +114,7 @@ func (m *Manager) EnqueueCompletedTransaction(ctx context.Context, tx *store.Tra
 	if tx.MeterStop == nil {
 		return errors.New("missing meter_stop")
 	}
-	if tx.TotalConsumption == nil || *tx.TotalConsumption <= 0 {
+	if tx.TotalConsumption == nil || *tx.TotalConsumption < 0 {
 		return fmt.Errorf("invalid total_consumption: %v", tx.TotalConsumption)
 	}
 
@@ -163,6 +163,8 @@ func (m *Manager) loop() {
 }
 
 func (m *Manager) processOnce(ctx context.Context) {
+	m.reconcileMissingCallbacks(ctx)
+
 	tasks, err := m.store.ClaimDueCallbacks(ctx, 10)
 	if err != nil {
 		m.logger.Warn("failed to claim callback outbox tasks", "error", err)
@@ -171,6 +173,39 @@ func (m *Manager) processOnce(ctx context.Context) {
 
 	for _, task := range tasks {
 		m.processTask(ctx, task)
+	}
+}
+
+func (m *Manager) reconcileMissingCallbacks(ctx context.Context) {
+	startTransactions, err := m.store.ListTransactionsMissingStartCallbacks(ctx, 25)
+	if err != nil {
+		m.logger.Warn("failed to reconcile missing start callbacks", "error", err)
+	} else {
+		for _, tx := range startTransactions {
+			if err := m.EnqueueStartTransaction(ctx, tx); err != nil {
+				m.logger.Warn(
+					"failed to recover missing start callback",
+					"transaction_id", tx.TransactionID,
+					"error", err,
+				)
+			}
+		}
+	}
+
+	completedTransactions, err := m.store.ListTransactionsMissingCompletedCallbacks(ctx, 25)
+	if err != nil {
+		m.logger.Warn("failed to reconcile missing completed callbacks", "error", err)
+		return
+	}
+
+	for _, tx := range completedTransactions {
+		if err := m.EnqueueCompletedTransaction(ctx, tx); err != nil {
+			m.logger.Warn(
+				"failed to recover missing completed callback",
+				"transaction_id", tx.TransactionID,
+				"error", err,
+			)
+		}
 	}
 }
 
@@ -212,20 +247,10 @@ func (m *Manager) postTask(ctx context.Context, task store.CallbackTask) (postRe
 	payload := task.Payload
 
 	if task.Kind == KindStartTransaction {
-		var body map[string]any
-		if err := json.Unmarshal(task.Payload, &body); err != nil {
-			return postResult{fatal: err.Error()}, nil
-		}
-
-		if txID, ok := body["transactionid"]; ok {
-			body["transactionid"] = fmt.Sprint(txID)
-		}
-
-		raw, err := json.Marshal(body)
+		raw, err := normalizeStartCallbackPayload(task.Payload)
 		if err != nil {
 			return postResult{fatal: err.Error()}, nil
 		}
-
 		payload = raw
 	}
 
@@ -245,20 +270,19 @@ func (m *Manager) postTask(ctx context.Context, task store.CallbackTask) (postRe
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode >= 500 {
-		return postResult{}, fmt.Errorf("server error %d: %s", resp.StatusCode, string(respBody))
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return postResult{}, fmt.Errorf("read callback response: %w", err)
 	}
 
 	if resp.StatusCode >= 400 {
-		return postResult{fatal: fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(respBody))}, nil
+		return postResult{}, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	if task.Kind == KindStartTransaction {
 		maxKWh, err := parseMaxKWhResponse(respBody)
 		if err != nil {
-			return postResult{fatal: err.Error()}, nil
+			return postResult{}, err
 		}
 
 		if task.TransactionID != nil {
@@ -274,6 +298,21 @@ func (m *Manager) postTask(ctx context.Context, task store.CallbackTask) (postRe
 	}
 
 	return postResult{}, nil
+}
+
+func normalizeStartCallbackPayload(payload json.RawMessage) ([]byte, error) {
+	var body map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	if err := decoder.Decode(&body); err != nil {
+		return nil, err
+	}
+
+	if txID, ok := body["transactionid"]; ok {
+		body["transactionid"] = fmt.Sprint(txID)
+	}
+
+	return json.Marshal(body)
 }
 
 type flexibleFloat64 float64
