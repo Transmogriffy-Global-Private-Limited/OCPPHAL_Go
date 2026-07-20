@@ -96,16 +96,18 @@ PostgreSQL is used for transaction persistence and callback outbox durability.
 
 Run migrations before starting the service in a new environment:
 
-- migrations/001_create_transactions.sql
+- migrations/001_create_transactions_postgres.sql
 - migrations/002_create_callback_outbox.sql
 - migrations/003_add_limit_stop_requested.sql
+- migrations/004_require_transaction_id.sql
 
 Example:
 
     $env:PGPASSWORD = Read-Host "PostgreSQL password"
-    psql -h 127.0.0.1 -p 5432 -U ocppgodbadmin -d ocppgo -f ./migrations/001_create_transactions.sql
+    psql -h 127.0.0.1 -p 5432 -U ocppgodbadmin -d ocppgo -f ./migrations/001_create_transactions_postgres.sql
     psql -h 127.0.0.1 -p 5432 -U ocppgodbadmin -d ocppgo -f ./migrations/002_create_callback_outbox.sql
     psql -h 127.0.0.1 -p 5432 -U ocppgodbadmin -d ocppgo -f ./migrations/003_add_limit_stop_requested.sql
+    psql -h 127.0.0.1 -p 5432 -U ocppgodbadmin -d ocppgo -f ./migrations/004_require_transaction_id.sql
 
 ## Build
 
