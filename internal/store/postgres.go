@@ -216,6 +216,9 @@ is_single_session
 		&tx.IsSingleSession,
 	)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrTransactionNotFound
+		}
 		return nil, err
 	}
 
@@ -227,6 +230,77 @@ is_single_session
 	}
 	if stopTime.Valid {
 		tx.StopTime = &stopTime.Time
+	}
+
+	return &tx, nil
+}
+
+func (s *PostgresStore) GetByTransactionIDAndIDTag(ctx context.Context, transactionID int64, idTag string) (*Transaction, error) {
+	row := s.db.QueryRowContext(
+		ctx,
+		`SELECT
+id,
+uuiddb,
+charger_id,
+connector_id,
+meter_start,
+meter_stop,
+total_consumption,
+start_time,
+stop_time,
+id_tag,
+transaction_id,
+is_single_session,
+max_kwh,
+limit_stop_requested
+ FROM transactions
+ WHERE transaction_id = $1
+   AND id_tag = $2
+ LIMIT 1`,
+		transactionID,
+		idTag,
+	)
+
+	var tx Transaction
+	var meterStop sql.NullFloat64
+	var totalConsumption sql.NullFloat64
+	var stopTime sql.NullTime
+	var maxKWh sql.NullFloat64
+
+	err := row.Scan(
+		&tx.ID,
+		&tx.UUIDDB,
+		&tx.ChargerID,
+		&tx.ConnectorID,
+		&tx.MeterStart,
+		&meterStop,
+		&totalConsumption,
+		&tx.StartTime,
+		&stopTime,
+		&tx.IDTag,
+		&tx.TransactionID,
+		&tx.IsSingleSession,
+		&maxKWh,
+		&tx.LimitStopRequested,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrTransactionNotFound
+		}
+		return nil, err
+	}
+
+	if meterStop.Valid {
+		tx.MeterStop = &meterStop.Float64
+	}
+	if totalConsumption.Valid {
+		tx.TotalConsumption = &totalConsumption.Float64
+	}
+	if stopTime.Valid {
+		tx.StopTime = &stopTime.Time
+	}
+	if maxKWh.Valid {
+		tx.MaxKWh = &maxKWh.Float64
 	}
 
 	return &tx, nil

@@ -67,6 +67,11 @@ All protected REST endpoints expect the configured API key in the x-api-key head
 - ws://host:{OCPP_LISTEN_PORT}/{charger_id} for OCPP 1.6 charger connection.
 - ws://host:{OCPP_LISTEN_PORT}/{charger_id}/{serialnumber} for OCPP 1.6 charger connection with serial suffix compatibility.
 - ws://host:{F_SERVER_PORT}/frontend/ws/{uid} for frontend status snapshots.
+- ws://host:{F_SERVER_PORT}/frontend/ws/transaction?transaction_id={transaction_id}&id_tag={id_tag} for exact live transaction snapshots.
+
+Passenger frontend integration for start, live transaction updates, exact stop,
+completion, and CMS history is documented in
+[docs/USER_FRONTEND_LIVE_TRANSACTION_INTEGRATION.md](docs/USER_FRONTEND_LIVE_TRANSACTION_INTEGRATION.md).
 
 ## Configuration
 

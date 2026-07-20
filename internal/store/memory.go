@@ -75,7 +75,7 @@ func (s *MemoryStore) UpdateLiveMeter(ctx context.Context, input UpdateLiveMeter
 
 	tx := s.transactions[input.TransactionID]
 	if tx == nil || tx.ChargerID != input.ChargerID {
-		return nil, errors.New("transaction not found")
+		return nil, ErrTransactionNotFound
 	}
 
 	tx.MeterStop = floatPtr(input.MeterStop)
@@ -92,7 +92,7 @@ func (s *MemoryStore) StopTransaction(ctx context.Context, input StopTransaction
 
 	tx := s.transactions[input.TransactionID]
 	if tx == nil || tx.ChargerID != input.ChargerID {
-		return nil, errors.New("transaction not found")
+		return nil, ErrTransactionNotFound
 	}
 
 	if tx.StopTime != nil {
@@ -115,7 +115,19 @@ func (s *MemoryStore) GetByTransactionID(ctx context.Context, chargerID string, 
 
 	tx := s.transactions[transactionID]
 	if tx == nil || tx.ChargerID != chargerID {
-		return nil, errors.New("transaction not found")
+		return nil, ErrTransactionNotFound
+	}
+
+	return cloneTransaction(tx), nil
+}
+
+func (s *MemoryStore) GetByTransactionIDAndIDTag(ctx context.Context, transactionID int64, idTag string) (*Transaction, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx := s.transactions[transactionID]
+	if tx == nil || tx.IDTag != idTag {
+		return nil, ErrTransactionNotFound
 	}
 
 	return cloneTransaction(tx), nil

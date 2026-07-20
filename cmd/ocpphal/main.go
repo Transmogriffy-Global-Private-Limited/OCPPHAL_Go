@@ -37,6 +37,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	txUpdates := store.NewTransactionUpdates()
+	txStore = store.WithTransactionUpdates(txStore, txUpdates)
+
 	hookManager := hooks.NewManager(cfg, txStore, logger)
 	hookManager.Start()
 
@@ -54,7 +57,7 @@ func main() {
 		}
 	}()
 
-	api := httpapi.NewServer(cfg, logger, registry, hal)
+	api := httpapi.NewServer(cfg, logger, registry, hal, txStore, txUpdates)
 
 	restServer := &http.Server{
 		Addr:              cfg.RESTListenAddr(),

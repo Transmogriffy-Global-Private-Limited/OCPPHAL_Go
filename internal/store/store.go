@@ -3,8 +3,11 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 )
+
+var ErrTransactionNotFound = errors.New("transaction not found")
 
 type Transaction struct {
 	ID                 int64
@@ -78,6 +81,7 @@ type TransactionStore interface {
 	StopTransaction(ctx context.Context, input StopTransactionInput) (*Transaction, error)
 	ForceCloseTransaction(ctx context.Context, input ForceCloseTransactionInput) (*Transaction, error)
 	GetByTransactionID(ctx context.Context, chargerID string, transactionID int64) (*Transaction, error)
+	GetByTransactionIDAndIDTag(ctx context.Context, transactionID int64, idTag string) (*Transaction, error)
 	ListOpenTransactionsByCharger(ctx context.Context, chargerID string) ([]*Transaction, error)
 	ListTransactionsMissingStartCallbacks(ctx context.Context, limit int) ([]*Transaction, error)
 	ListTransactionsMissingCompletedCallbacks(ctx context.Context, limit int) ([]*Transaction, error)

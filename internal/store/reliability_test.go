@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"testing"
 )
@@ -125,5 +126,33 @@ func TestMemoryStoreLimitStopClaimCanBeReleased(t *testing.T) {
 	claimed, err = s.CheckAndMarkLimitStop(ctx, tx.ChargerID, tx.TransactionID)
 	if err != nil || !claimed {
 		t.Fatalf("reclaimed limit stop = %v, %v; want true, nil", claimed, err)
+	}
+}
+
+func TestMemoryStoreFindsTransactionByExactIDTag(t *testing.T) {
+	ctx := context.Background()
+	s := NewMemoryStore()
+
+	tx, err := s.CreateTransaction(ctx, CreateTransactionInput{
+		ChargerID:   "CP-EXACT",
+		ConnectorID: 1,
+		MeterStart:  1000,
+		IDTag:       "USER-EXACT",
+	})
+	if err != nil {
+		t.Fatalf("create transaction: %v", err)
+	}
+
+	found, err := s.GetByTransactionIDAndIDTag(ctx, tx.TransactionID, "USER-EXACT")
+	if err != nil {
+		t.Fatalf("get exact transaction: %v", err)
+	}
+	if found.TransactionID != tx.TransactionID || found.IDTag != "USER-EXACT" {
+		t.Fatalf("exact transaction = %#v, want transaction %d for USER-EXACT", found, tx.TransactionID)
+	}
+
+	_, err = s.GetByTransactionIDAndIDTag(ctx, tx.TransactionID, "OTHER-USER")
+	if !errors.Is(err, ErrTransactionNotFound) {
+		t.Fatalf("mismatched idTag error = %v, want ErrTransactionNotFound", err)
 	}
 }

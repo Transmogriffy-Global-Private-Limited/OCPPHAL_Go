@@ -10,21 +10,33 @@ import (
 	"github.com/Transmogriffy-Global-Private-Limited/OCPPHAL_Go/internal/config"
 	"github.com/Transmogriffy-Global-Private-Limited/OCPPHAL_Go/internal/ocpp16hal"
 	"github.com/Transmogriffy-Global-Private-Limited/OCPPHAL_Go/internal/state"
+	"github.com/Transmogriffy-Global-Private-Limited/OCPPHAL_Go/internal/store"
 )
 
 type Server struct {
-	cfg      config.Config
-	logger   *slog.Logger
-	registry *state.Registry
-	hal      *ocpp16hal.HAL
+	cfg       config.Config
+	logger    *slog.Logger
+	registry  *state.Registry
+	hal       *ocpp16hal.HAL
+	txStore   store.TransactionStore
+	txUpdates *store.TransactionUpdates
 }
 
-func NewServer(cfg config.Config, logger *slog.Logger, registry *state.Registry, hal *ocpp16hal.HAL) *Server {
+func NewServer(
+	cfg config.Config,
+	logger *slog.Logger,
+	registry *state.Registry,
+	hal *ocpp16hal.HAL,
+	txStore store.TransactionStore,
+	txUpdates *store.TransactionUpdates,
+) *Server {
 	return &Server{
-		cfg:      cfg,
-		logger:   logger,
-		registry: registry,
-		hal:      hal,
+		cfg:       cfg,
+		logger:    logger,
+		registry:  registry,
+		hal:       hal,
+		txStore:   txStore,
+		txUpdates: txUpdates,
 	}
 }
 
@@ -32,6 +44,7 @@ func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/hello", s.hello)
+	mux.HandleFunc("/frontend/ws/transaction", s.frontendTransactionWebSocket)
 	mux.HandleFunc("/frontend/ws/", s.frontendWebSocket)
 
 	for _, path := range []string{
