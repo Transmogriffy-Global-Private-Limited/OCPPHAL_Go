@@ -30,6 +30,7 @@ New-Item -ItemType Directory -Force -Path ".\builds" | Out-Null
 
 $targets = @(
     @{ Name = "ocpphal";         Path = ".\cmd\ocpphal" },
+    @{ Name = "cpconsole";       Path = ".\cmd\cpconsole" },
     @{ Name = "cpsmoke";         Path = ".\cmd\cpsmoke" },
     @{ Name = "cplimitsmoke";    Path = ".\cmd\cplimitsmoke" },
     @{ Name = "cpsinglesmoke";   Path = ".\cmd\cpsinglesmoke" },

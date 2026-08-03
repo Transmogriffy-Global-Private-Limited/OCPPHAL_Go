@@ -38,6 +38,7 @@ If PostgreSQL or local services are unavailable, state that clearly and provide 
 - cmd/cplimitsmoke: max-kWh auto-stop smoke client.
 - cmd/cpsinglesmoke: single-session smoke client.
 - cmd/frontendwssmoke: frontend WebSocket smoke client.
+- cmd/cpconsole: standalone interactive OCPP 1.6J virtual charger.
 - internal/ocpp16hal: OCPP 1.6 HAL, central handlers, outbound charger commands.
 - internal/httpapi: CMS REST compatibility API and frontend WebSocket route.
 - internal/store: memory and PostgreSQL stores.
@@ -47,6 +48,19 @@ If PostgreSQL or local services are unavailable, state that clearly and provide 
 - migrations: PostgreSQL schema migrations.
 - scripts: build and regression scripts.
 - docs: operational docs.
+
+## Required project memory and documentation
+
+Before meaningful planning or implementation, read:
+
+- docs/README.md
+- docs/DEVELOPMENT_PLAN.md
+- docs/PROJECT_STATE.md
+- docs/AI_CHANGELOG.md
+- the relevant focused guide under docs/
+
+Update these files in the same slice when implemented behavior, contracts,
+verification status, or approved sequencing changes.
 
 ## Active compatibility surface
 

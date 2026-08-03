@@ -19,6 +19,7 @@ The service replaces the legacy OCPP compatibility layer while preserving the ac
 - Boot-time open transaction recovery for charger reconnect/reboot scenarios.
 - Frontend WebSocket status snapshots.
 - Local smoke clients and regression scripts.
+- Interactive, terminal-controlled OCPP 1.6J virtual charger for hardware-free testing.
 
 ## Repository layout
 
@@ -30,6 +31,7 @@ The service replaces the legacy OCPP compatibility layer while preserving the ac
 | cmd/cplimitsmoke | Pure max-kWh auto-stop smoke client. |
 | cmd/cpsinglesmoke | Single-session smoke client. |
 | cmd/frontendwssmoke | Frontend WebSocket smoke client. |
+| cmd/cpconsole | Standalone interactive OCPP 1.6J virtual charger. |
 | internal/ocpp16hal | OCPP 1.6 HAL, central system handlers, and outbound charger commands. |
 | internal/httpapi | CMS-facing REST API and frontend WebSocket compatibility layer. |
 | internal/store | PostgreSQL and memory stores for transactions, analytics, and callbacks. |
@@ -121,11 +123,30 @@ Example:
 This builds:
 
 - builds/ocpphal.exe
+- builds/cpconsole.exe
 - builds/mockhooks.exe
 - builds/cpsmoke.exe
 - builds/cplimitsmoke.exe
 - builds/cpsinglesmoke.exe
 - builds/frontendwssmoke.exe
+
+## Virtual charger
+
+`cpconsole` is a standalone virtual EV charger. It is not hosted inside the HAL
+process. Like physical hardware, it connects to an OCPP 1.6J Central System and
+uses a caller-selected charge point identity.
+
+Local example:
+
+    ./builds/cpconsole.exe -id CP-SIM-001 -url ws://127.0.0.1:18081
+
+Hosted example:
+
+    ./builds/cpconsole.exe -id CP-SIM-001 -url wss://ocpp.example.com
+
+The selected charger ID must be recognized by the target HAL charger directory.
+See [docs/SOFTWARE_CHARGER.md](docs/SOFTWARE_CHARGER.md) for the complete command,
+state-flow, Linux-build, and troubleshooting guide.
 
 ## Local regression
 
