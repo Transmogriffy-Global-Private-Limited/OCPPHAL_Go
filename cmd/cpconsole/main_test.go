@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -48,6 +49,117 @@ func TestNormalizeWebSocketURL(t *testing.T) {
 	}
 	if _, err := normalizeWebSocketURL("https://ocpp.example.com"); err == nil {
 		t.Fatal("normalizeWebSocketURL accepted an HTTP URL")
+	}
+}
+
+func TestParseAutoMeterConfig(t *testing.T) {
+	config, err := parseAutoMeterConfig("10s", "7200")
+	if err != nil || config.interval != 10*time.Second || config.wattageW != 7200 {
+		t.Fatalf("parseAutoMeterConfig() = %#v, %v", config, err)
+	}
+	for _, values := range [][2]string{{"10s", ""}, {"", "7200"}, {"0s", "7200"}, {"10s", "-1"}, {"bad", "7200"}} {
+		if _, err := parseAutoMeterConfig(values[0], values[1]); err == nil {
+			t.Fatalf("parseAutoMeterConfig(%q, %q) unexpectedly succeeded", values[0], values[1])
+		}
+	}
+}
+
+func TestAutoMeterUsesElapsedTimeAndPreservesFractionalWh(t *testing.T) {
+	s := newMeterTestSimulator(autoMeterConfig{interval: 10 * time.Second, wattageW: 7200})
+	s.transaction = 101
+	var transactionIDs []int
+	s.meterValuesFunc = func(_ int, transactionID int, _ float64, _ float64) error {
+		transactionIDs = append(transactionIDs, transactionID)
+		return nil
+	}
+	if err := s.sendMeterForTransaction(10*time.Second, 7.2, 101); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.sendMeterForTransaction(11500*time.Millisecond, 7.2, 101); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.sendMeterForTransaction(time.Second, 0.001, 101); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.RLock()
+	meter := s.meterWh
+	s.mu.RUnlock()
+	if math.Abs(meter-100043.00027777778) > 0.0000001 {
+		t.Fatalf("meterWh=%0.9f, want 100043.000277778", meter)
+	}
+	if len(transactionIDs) != 3 || transactionIDs[0] != 101 || transactionIDs[2] != 101 {
+		t.Fatalf("MeterValues transaction IDs=%v", transactionIDs)
+	}
+}
+
+func TestAutomaticMeterStartsOnlyForTransactionAndStopsBeforeFinalMeter(t *testing.T) {
+	s := newMeterTestSimulator(autoMeterConfig{interval: 5 * time.Millisecond, wattageW: 7200})
+	if err := s.startAuto(s.autoMeter.interval, s.autoMeter.powerKW()); err == nil {
+		t.Fatal("automatic metering started without a transaction")
+	}
+
+	meters := make(chan int, 16)
+	var meterMu sync.Mutex
+	var meterCount int
+	s.meterValuesFunc = func(_ int, transactionID int, _ float64, _ float64) error {
+		meterMu.Lock()
+		meterCount++
+		meterMu.Unlock()
+		meters <- transactionID
+		return nil
+	}
+	nextTransaction := 101
+	s.startTransactionFunc = func(_ int, _ string, _ int) (*core.StartTransactionConfirmation, error) {
+		id := nextTransaction
+		nextTransaction++
+		return core.NewStartTransactionConfirmation(&types.IdTagInfo{Status: types.AuthorizationStatusAccepted}, id), nil
+	}
+	var finalMeterStop int
+	s.stopTransactionFunc = func(meterStop, _ int, _ string, _ core.Reason) (*core.StopTransactionConfirmation, error) {
+		finalMeterStop = meterStop
+		return core.NewStopTransactionConfirmation(), nil
+	}
+	s.statusFunc = func(core.ChargePointStatus, core.ChargePointErrorCode) error { return nil }
+
+	if err := s.startTransaction("first", true); err != nil {
+		t.Fatal(err)
+	}
+	awaitMeterTransaction(t, meters, 101)
+	if err := s.stopTransaction(core.ReasonLocal); err != nil {
+		t.Fatal(err)
+	}
+	if finalMeterStop < 100000 {
+		t.Fatalf("meterStop=%d, want cumulative final meter", finalMeterStop)
+	}
+	meterMu.Lock()
+	stoppedCount := meterCount
+	meterMu.Unlock()
+	time.Sleep(20 * time.Millisecond)
+	meterMu.Lock()
+	currentMeterCount := meterCount
+	meterMu.Unlock()
+	if currentMeterCount != stoppedCount {
+		t.Fatalf("MeterValues continued after stop: before=%d after=%d", stoppedCount, currentMeterCount)
+	}
+
+	if err := s.startTransaction("second", true); err != nil {
+		t.Fatal(err)
+	}
+	awaitMeterTransaction(t, meters, 102)
+	if err := s.stopTransaction(core.ReasonLocal); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func awaitMeterTransaction(t *testing.T, meters <-chan int, want int) {
+	t.Helper()
+	select {
+	case got := <-meters:
+		if got != want {
+			t.Fatalf("MeterValues transactionId=%d, want %d", got, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for MeterValues transactionId=%d", want)
 	}
 }
 
@@ -165,9 +277,15 @@ type testError struct{ message string }
 func (e *testError) Error() string { return e.message }
 
 func newRemoteStopTestSimulator() *simulator {
-	s := newSimulator("test-cp", "model", "vendor", 1, 100000, 230, 35)
+	s := newSimulator("test-cp", "model", "vendor", 1, 100000, 230, 35, autoMeterConfig{})
 	s.transaction = 1786889261
 	s.idTag = "test-tag"
 	s.status = core.ChargePointStatusCharging
+	return s
+}
+
+func newMeterTestSimulator(config autoMeterConfig) *simulator {
+	s := newSimulator("test-cp", "model", "vendor", 1, 100000, 230, 35, config)
+	s.status = core.ChargePointStatusAvailable
 	return s
 }

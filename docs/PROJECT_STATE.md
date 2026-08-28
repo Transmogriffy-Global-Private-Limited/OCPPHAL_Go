@@ -14,6 +14,8 @@ remote commands, frontend status snapshots, recovery behavior and local regressi
 - advances a cumulative Wh register using elapsed time and power;
 - publishes energy, power, current, voltage and SoC samples;
 - supports automatic periodic metering, faults and remote-response policies;
+- can opt into startup-configured transaction-bound MeterValues using a
+  duration and constant wattage while retaining the manual meter controls;
 - completes every accepted remote stop with one StopTransaction and a
   deterministic Finishing-to-Available transition;
 - handles the HAL's active Core, Firmware Management and Remote Trigger commands;

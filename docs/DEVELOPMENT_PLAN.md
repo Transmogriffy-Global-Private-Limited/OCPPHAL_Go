@@ -46,6 +46,10 @@ Follow-up correction: accepted remote stops now own a single deterministic
 completion path through StopTransaction, Finishing, and Available; focused
 lifecycle tests cover duplicate commands and failed Finishing notification.
 
+Follow-up enhancement: optional startup-configured automatic MeterValues use
+actual elapsed time, preserve fractional cumulative Wh, bind each worker to one
+transaction ID, and stop before the final StopTransaction meter snapshot.
+
 Verification: focused tests, `go test ./...`, repository build, Linux cross-build,
 and a loopback memory-store charge flow passed. The canonical PostgreSQL
 regression remains required before changing this status to Verified.

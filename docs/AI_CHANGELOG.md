@@ -1,5 +1,20 @@
 # AI-assisted changelog
 
+## 2026-08-28 — Transaction-bound automatic cpconsole metering
+
+- Added opt-in `-auto-meter-interval` and `-auto-meter-watts` startup flags
+  (and matching `CP_SIM_AUTO_METER_*` environment variables).
+- A successful transaction now starts one configured meter worker; each sample
+  uses actual elapsed duration and the existing cumulative fractional Wh meter.
+- Stop paths cancel that worker before the final StopTransaction meter snapshot;
+  a later transaction receives a fresh worker and transaction ID.
+- Preserved manual `tick`, `meter`, and `auto` controls against the same meter
+  register, and added focused lifecycle, precision, validation, and sequencing
+  tests.
+
+Compatibility: cpconsole-only change; HAL/CMS contracts, services, and durable
+state remain untouched.
+
 ## 2026-08-28 — Deterministic accepted remote-stop completion
 
 - Corrected `cpconsole` so an accepted RemoteStopTransaction owns its lifecycle:
