@@ -149,12 +149,10 @@ assigned by the Central System and never fabricated by the simulator.
 
 ## Remote CMS flow
 
-By default, valid `RemoteStartTransaction` requests are accepted and executed
-after their confirmation is returned. A valid `RemoteStopTransaction` is always
-self-completing once it is accepted: cpconsole sends exactly one
-`StopTransaction`, clears its active state after the confirmation, then reports
-`Finishing` followed immediately by `Available`. It never waits for a manual
-simulated unplug action, so the connector can admit the next session.
+By default, valid `RemoteStartTransaction` and `RemoteStopTransaction` requests
+are accepted and executed after their confirmation is returned. This models a
+normal connected charger and lets the existing CMS `/api/start_transaction` and
+`/api/stop_transaction` flow operate without extra terminal commands.
 
 For manual failure and timing tests:
 
@@ -164,8 +162,7 @@ policy remote-start accept
 ```
 
 The next valid remote start is acknowledged and retained as pending. Inspect it
-with `state`, then run `remote-start`. Accepted remote stops are intentionally
-not deferrable.
+with `state`, then run `remote-start`. The equivalent command is `remote-stop`.
 Future remote commands may be rejected deliberately with:
 
 ```text
@@ -188,8 +185,7 @@ Run `help` inside the program for the canonical compact command list.
 - `auto <seconds> <power-kW>` sends periodic coherent readings; `auto off` stops it.
 - `fault <error-code>` and `clear-fault` test valid OCPP fault behavior.
 - `status <ocpp-status>` is an explicit escape hatch for protocol edge testing.
-- `policy ...` controls responses and automatic execution of remote starts;
-  accepted remote stops always complete.
+- `policy ...` controls responses and automatic execution of remote commands.
 - `quit` closes the client cleanly.
 
 Invalid state transitions are rejected for normal commands. The explicit
