@@ -81,25 +81,13 @@ type simulator struct {
 	autoRemote           bool
 	unavailableAfterStop bool
 	autoCancel           chan struct{}
-	autoTransaction      int
-	autoMeter            autoMeterConfig
 	configuration        map[string]string
 	startTransactionFunc func(connectorID int, idTag string, meterStart int) (*core.StartTransactionConfirmation, error)
 	stopTransactionFunc  func(meterStop, transactionID int, idTag string, reason core.Reason) (*core.StopTransactionConfirmation, error)
 	statusFunc           func(status core.ChargePointStatus, code core.ChargePointErrorCode) error
-	meterValuesFunc      func(connectorID, transactionID int, meterWh, powerKW float64) error
 }
 
-type autoMeterConfig struct {
-	interval time.Duration
-	wattageW float64
-}
-
-func (c autoMeterConfig) enabled() bool { return c.interval > 0 }
-
-func (c autoMeterConfig) powerKW() float64 { return c.wattageW / 1000 }
-
-func newSimulator(clientID, model, vendor string, connectorID int, meterStartWh, voltage, soc float64, autoMeter autoMeterConfig) *simulator {
+func newSimulator(clientID, model, vendor string, connectorID int, meterStartWh, voltage, soc float64) *simulator {
 	s := &simulator{
 		clientID:      clientID,
 		model:         model,
@@ -110,7 +98,6 @@ func newSimulator(clientID, model, vendor string, connectorID int, meterStartWh,
 		meterWh:       meterStartWh,
 		voltage:       voltage,
 		soc:           soc,
-		autoMeter:     autoMeter,
 		acceptStart:   true,
 		acceptStop:    true,
 		autoRemote:    true,
@@ -132,8 +119,6 @@ func main() {
 	meterStart := flag.Float64("meter-start-wh", envFloat("CP_SIM_METER_START_WH", 100000), "initial cumulative energy register in Wh")
 	voltage := flag.Float64("voltage", envFloat("CP_SIM_VOLTAGE", 230), "simulated voltage in V")
 	soc := flag.Float64("soc", envFloat("CP_SIM_SOC", 35), "initial state of charge percentage")
-	autoMeterInterval := flag.String("auto-meter-interval", os.Getenv("CP_SIM_AUTO_METER_INTERVAL"), "automatic MeterValues interval (for example 10s; requires -auto-meter-watts)")
-	autoMeterWatts := flag.String("auto-meter-watts", os.Getenv("CP_SIM_AUTO_METER_WATTS"), "automatic simulated charging power in W (requires -auto-meter-interval)")
 	flag.Parse()
 
 	if *connector < 1 || *meterStart < 0 || *voltage <= 0 || *soc < 0 || *soc > 100 {
@@ -142,25 +127,18 @@ func main() {
 	if strings.TrimSpace(*clientID) == "" || strings.TrimSpace(*model) == "" || len(*model) > 20 || strings.TrimSpace(*vendor) == "" || len(*vendor) > 20 {
 		log.Fatal("charger ID must be non-empty; OCPP model and vendor must contain 1 to 20 characters")
 	}
-	autoMeter, err := parseAutoMeterConfig(*autoMeterInterval, *autoMeterWatts)
-	if err != nil {
-		log.Fatal(err)
-	}
 	normalizedURL, err := normalizeWebSocketURL(*centralURL)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	sim := newSimulator(*clientID, *model, *vendor, *connector, *meterStart, *voltage, *soc, autoMeter)
+	sim := newSimulator(*clientID, *model, *vendor, *connector, *meterStart, *voltage, *soc)
 	if err := sim.connectAndBoot(normalizedURL); err != nil {
 		log.Fatal(err)
 	}
 	defer sim.close()
 
 	fmt.Printf("\nOCPP 1.6J software charger %s is ready. Type help for commands.\n", *clientID)
-	if autoMeter.enabled() {
-		fmt.Printf("[SIM] startup automatic metering configured every %s at %.0fW\n", autoMeter.interval, autoMeter.wattageW)
-	}
 	if err := runConsole(os.Stdin, os.Stdout, sim); err != nil {
 		log.Fatal(err)
 	}
@@ -495,29 +473,16 @@ func (s *simulator) startTransaction(idTag string, remote bool) error {
 		return err
 	}
 	fmt.Printf("[OCPP] StartTransaction accepted; transactionId=%d meterStart=%.0fWh idTag=%s\n", conf.TransactionId, meter, idTag)
-	if s.autoMeter.enabled() {
-		if err := s.startAuto(s.autoMeter.interval, s.autoMeter.powerKW()); err != nil {
-			fmt.Printf("[SIM] startup automatic metering did not start for transactionId=%d: %v\n", conf.TransactionId, err)
-		}
-	}
 	return nil
 }
 
 func (s *simulator) sendMeter(elapsed time.Duration, powerKW float64) error {
-	return s.sendMeterForTransaction(elapsed, powerKW, 0)
-}
-
-func (s *simulator) sendMeterForTransaction(elapsed time.Duration, powerKW float64, expectedTransaction int) error {
 	s.opsMu.Lock()
 	defer s.opsMu.Unlock()
 	s.mu.Lock()
 	if s.transaction == 0 {
 		s.mu.Unlock()
 		return errors.New("meter values require an active transaction")
-	}
-	if expectedTransaction != 0 && (s.transaction != expectedTransaction || s.stoppingTransaction != 0) {
-		s.mu.Unlock()
-		return errors.New("automatic metering transaction is no longer active")
 	}
 	if elapsed < 0 || powerKW < 0 {
 		s.mu.Unlock()
@@ -554,14 +519,9 @@ func (s *simulator) sendMeterForTransaction(elapsed time.Duration, powerKW float
 			{Value: fmt.Sprintf("%.1f", soc), Context: types.ReadingContextSamplePeriodic, Measurand: types.MeasurandSoC, Unit: types.UnitOfMeasurePercent},
 		},
 	}}
-	var err error
-	if s.meterValuesFunc != nil {
-		err = s.meterValuesFunc(connector, transaction, meterWh, powerKW)
-	} else {
-		_, err = s.cp.MeterValues(connector, values, func(request *core.MeterValuesRequest) {
-			request.TransactionId = &transaction
-		})
-	}
+	_, err := s.cp.MeterValues(connector, values, func(request *core.MeterValuesRequest) {
+		request.TransactionId = &transaction
+	})
 	if err != nil {
 		return fmt.Errorf("MeterValues: %w", err)
 	}
@@ -704,32 +664,21 @@ func (s *simulator) requireTransactionStatus(status core.ChargePointStatus) erro
 }
 
 func (s *simulator) startAuto(interval time.Duration, powerKW float64) error {
-	if interval <= 0 || powerKW < 0 {
-		return errors.New("automatic metering interval must be greater than zero and power cannot be negative")
-	}
-	s.mu.RLock()
-	transaction := s.transaction
-	stopping := s.stoppingTransaction
-	s.mu.RUnlock()
-	if transaction == 0 || stopping != 0 {
+	if !s.hasTransaction() {
 		return errors.New("automatic metering requires an active transaction")
 	}
 	s.stopAuto()
 	cancel := make(chan struct{})
 	s.mu.Lock()
 	s.autoCancel = cancel
-	s.autoTransaction = transaction
 	s.mu.Unlock()
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		lastSampleAt := time.Now()
 		for {
 			select {
-			case sampleAt := <-ticker.C:
-				elapsed := sampleAt.Sub(lastSampleAt)
-				lastSampleAt = sampleAt
-				if err := s.sendMeterForTransaction(elapsed, powerKW, transaction); err != nil {
+			case <-ticker.C:
+				if err := s.sendMeter(interval, powerKW); err != nil {
 					fmt.Printf("[SIM] automatic meter stopped: %v\n", err)
 					return
 				}
@@ -738,7 +687,7 @@ func (s *simulator) startAuto(interval time.Duration, powerKW float64) error {
 			}
 		}
 	}()
-	fmt.Printf("[SIM] automatic metering transactionId=%d every %s at %.3fkW\n", transaction, interval, powerKW)
+	fmt.Printf("[SIM] automatic metering every %s at %.3fkW\n", interval, powerKW)
 	return nil
 }
 
@@ -748,7 +697,6 @@ func (s *simulator) stopAuto() {
 		close(s.autoCancel)
 		s.autoCancel = nil
 	}
-	s.autoTransaction = 0
 	s.mu.Unlock()
 }
 
@@ -777,7 +725,7 @@ func (s *simulator) printState() {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	fmt.Printf("connected=%t booted=%t id=%s connector=%d status=%s error=%s plugged=%t\n", s.cp.IsConnected(), s.booted, s.clientID, s.connectorID, s.status, s.errorCode, s.plugged)
-	fmt.Printf("transactionId=%d stoppingTransactionId=%d autoMeterTransactionId=%d idTag=%q meter=%.0fWh power=%.3fkW voltage=%.1fV soc=%.1f%% pendingRemoteStart=%t autoRemote=%t\n", s.transaction, s.stoppingTransaction, s.autoTransaction, s.idTag, s.meterWh, s.powerKW, s.voltage, s.soc, s.remoteStart != nil, s.autoRemote)
+	fmt.Printf("transactionId=%d stoppingTransactionId=%d idTag=%q meter=%.0fWh power=%.3fkW voltage=%.1fV soc=%.1f%% pendingRemoteStart=%t autoRemote=%t\n", s.transaction, s.stoppingTransaction, s.idTag, s.meterWh, s.powerKW, s.voltage, s.soc, s.remoteStart != nil, s.autoRemote)
 }
 
 func (s *simulator) hasTransaction() bool {
@@ -1019,26 +967,6 @@ func normalizeWebSocketURL(value string) (string, error) {
 		return "", errors.New("OCPP base URL cannot contain a query string or fragment; the charger ID is appended as the final path segment")
 	}
 	return value, nil
-}
-
-func parseAutoMeterConfig(intervalValue, wattageValue string) (autoMeterConfig, error) {
-	intervalValue = strings.TrimSpace(intervalValue)
-	wattageValue = strings.TrimSpace(wattageValue)
-	if intervalValue == "" && wattageValue == "" {
-		return autoMeterConfig{}, nil
-	}
-	if intervalValue == "" || wattageValue == "" {
-		return autoMeterConfig{}, errors.New("-auto-meter-interval and -auto-meter-watts must be supplied together")
-	}
-	interval, err := time.ParseDuration(intervalValue)
-	if err != nil || interval <= 0 {
-		return autoMeterConfig{}, fmt.Errorf("invalid -auto-meter-interval %q: use a duration greater than zero, for example 10s", intervalValue)
-	}
-	wattage, err := strconv.ParseFloat(wattageValue, 64)
-	if err != nil || wattage < 0 || wattage != wattage || wattage > 1e9 {
-		return autoMeterConfig{}, fmt.Errorf("invalid -auto-meter-watts %q: use a finite value greater than or equal to zero", wattageValue)
-	}
-	return autoMeterConfig{interval: interval, wattageW: wattage}, nil
 }
 
 func parseStatus(value string) (core.ChargePointStatus, bool) {

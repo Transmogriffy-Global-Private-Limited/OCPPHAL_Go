@@ -56,24 +56,6 @@ Supported flags:
 | `-meter-start-wh` | `CP_SIM_METER_START_WH` | `100000` | Initial cumulative energy register. |
 | `-voltage` | `CP_SIM_VOLTAGE` | `230` | Voltage used for coherent current calculation. |
 | `-soc` | `CP_SIM_SOC` | `35` | Initial EV state of charge. |
-| `-auto-meter-interval` | `CP_SIM_AUTO_METER_INTERVAL` | disabled | Go duration between automatic MeterValues, for example `10s`. Must be supplied with `-auto-meter-watts`. |
-| `-auto-meter-watts` | `CP_SIM_AUTO_METER_WATTS` | disabled | Constant simulated load in W. Must be finite, zero or greater, and supplied with `-auto-meter-interval`. |
-
-Automatic metering is opt-in: neither flag has a default, and supplying only
-one is rejected at startup. The existing `tick`, `meter`, and `auto` terminal
-commands remain available and mutate the same cumulative meter register.
-
-For a 7.2 kW dummy charger that reports every ten seconds:
-
-```text
-./builds/cpconsole-linux-amd64 -id CP-SIM-001 -url ws://127.0.0.1:19081 -auto-meter-interval 10s -auto-meter-watts 7200
-```
-
-With the default `100000 Wh` register, a transaction's expected cumulative
-progression is approximately `100000 Wh` at start, `100020 Wh` after ten
-seconds, `100040 Wh` after twenty seconds, and `100060 Wh` after thirty
-seconds. Actual delivery timing may vary; accumulation uses actual elapsed
-time rather than assuming every callback arrives exactly on schedule.
 
 Flags take precedence over environment values. These variables are simulator
 client settings; they are not consumed by the HAL server.
@@ -141,7 +123,6 @@ start USER001
 → StartTransaction with cumulative meterStart in Wh
 → server-assigned transactionId retained exactly
 → StatusNotification Charging
-→ if startup automatic metering is configured, start one meter worker for this transaction
 
 tick 60 7.2
 → add 120 Wh (7.2 kW × 60 seconds)
@@ -149,9 +130,11 @@ tick 60 7.2
 → cumulative energy, power, current, voltage and SoC samples
 
 stop Local
-→ cancel that transaction's automatic meter worker
 → StopTransaction with the same transactionId and cumulative meterStop
-→ StatusNotification Finishing then Available
+→ StatusNotification Finishing
+
+unplug
+→ StatusNotification Available
 ```
 
 `tick` never invents unrelated readings. The simulator calculates:
@@ -163,19 +146,6 @@ stop Local
 
 The energy register is monotonic and is transmitted in Wh. Transaction IDs are
 assigned by the Central System and never fabricated by the simulator.
-
-For automatic metering, the worker uses the elapsed monotonic duration between
-actual ticker firings, not the nominal interval:
-
-```text
-energyWh += wattageW * elapsedSeconds / 3600
-```
-
-Internal meter state remains fractional `float64` Wh. The existing OCPP
-boundary formatting rounds its reported energy reading, while `meterStop` is
-derived from the same cumulative register. Each worker is bound to one OCPP
-transaction ID; a stop cancels it before taking the final `meterStop` snapshot,
-and a later transaction creates a new worker.
 
 ## Remote CMS flow
 
