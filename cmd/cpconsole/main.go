@@ -37,14 +37,14 @@ const helpText = `Commands:
   suspend ev|evse                   report SuspendedEV or SuspendedEVSE
   resume                            report Charging for an active transaction
   stop [reason]                     stop locally; reason defaults to Local
-  remote-stop                       execute a pending accepted RemoteStopTransaction
+  remote-stop                       show that accepted remote stops complete automatically
   finish                            report Available after a stopped, still-plugged session
   fault <error-code>                report Faulted using an OCPP 1.6 error code
   clear-fault                       return to Preparing or Available
   status <ocpp-status>              send an explicit valid StatusNotification
   policy remote-start accept|reject set response policy for future remote starts
   policy remote-stop accept|reject  set response policy for future remote stops
-  policy auto-remote on|off         automatically execute accepted remote start/stop
+  policy auto-remote on|off         automatically execute accepted remote starts
   quit                              stop the simulator
 
 Stop reasons: DeAuthorized, EmergencyStop, EVDisconnected, HardReset, Local,
@@ -75,13 +75,16 @@ type simulator struct {
 	voltage              float64
 	soc                  float64
 	remoteStart          *core.RemoteStartTransactionRequest
-	remoteStop           *core.RemoteStopTransactionRequest
+	stoppingTransaction  int
 	acceptStart          bool
 	acceptStop           bool
 	autoRemote           bool
 	unavailableAfterStop bool
 	autoCancel           chan struct{}
 	configuration        map[string]string
+	startTransactionFunc func(connectorID int, idTag string, meterStart int) (*core.StartTransactionConfirmation, error)
+	stopTransactionFunc  func(meterStop, transactionID int, idTag string, reason core.Reason) (*core.StopTransactionConfirmation, error)
+	statusFunc           func(status core.ChargePointStatus, code core.ChargePointErrorCode) error
 }
 
 func newSimulator(clientID, model, vendor string, connectorID int, meterStartWh, voltage, soc float64) *simulator {
@@ -450,7 +453,7 @@ func (s *simulator) startTransaction(idTag string, remote bool) error {
 			return err
 		}
 	}
-	conf, err := s.cp.StartTransaction(s.connectorID, idTag, int(meter), types.Now())
+	conf, err := s.sendStartTransaction(s.connectorID, idTag, int(meter))
 	if err != nil {
 		return fmt.Errorf("StartTransaction: %w", err)
 	}
@@ -529,19 +532,38 @@ func (s *simulator) sendMeter(elapsed time.Duration, powerKW float64) error {
 func (s *simulator) stopTransaction(reason core.Reason) error {
 	s.opsMu.Lock()
 	defer s.opsMu.Unlock()
+	return s.stopTransactionLocked(reason, 0)
+}
+
+// stopTransactionLocked finalizes either a local stop or the one remote stop
+// already claimed by OnRemoteStopTransaction. opsMu serializes every sender so
+// an accepted remote command can never emit a second StopTransaction.
+func (s *simulator) stopTransactionLocked(reason core.Reason, expectedTransaction int) error {
 	s.stopAuto()
-	s.mu.RLock()
+	s.mu.Lock()
 	transaction := s.transaction
-	meter := s.meterWh
-	idTag := s.idTag
-	s.mu.RUnlock()
 	if transaction == 0 {
+		s.mu.Unlock()
 		return errors.New("no active transaction")
 	}
-	conf, err := s.cp.StopTransaction(int(meter), types.Now(), transaction, func(request *core.StopTransactionRequest) {
-		request.IdTag = idTag
-		request.Reason = reason
-	})
+	if expectedTransaction != 0 && transaction != expectedTransaction {
+		s.mu.Unlock()
+		return fmt.Errorf("active transaction %d does not match remote stop %d", transaction, expectedTransaction)
+	}
+	if expectedTransaction == 0 && s.stoppingTransaction != 0 {
+		s.mu.Unlock()
+		return errors.New("an accepted remote stop is already completing")
+	}
+	if s.stoppingTransaction != 0 && s.stoppingTransaction != transaction {
+		s.mu.Unlock()
+		return errors.New("another transaction is stopping")
+	}
+	s.stoppingTransaction = transaction
+	meter := s.meterWh
+	idTag := s.idTag
+	s.mu.Unlock()
+
+	conf, err := s.sendStopTransaction(int(meter), transaction, idTag, reason)
 	if err != nil {
 		return fmt.Errorf("StopTransaction: %w", err)
 	}
@@ -553,26 +575,76 @@ func (s *simulator) stopTransaction(reason core.Reason) error {
 	s.transaction = 0
 	s.idTag = ""
 	s.powerKW = 0
-	s.remoteStop = nil
+	s.stoppingTransaction = 0
+	s.plugged = false // A software charger has no physical cable to await.
 	s.mu.Unlock()
 	s.mu.RLock()
 	unavailable := s.unavailableAfterStop
 	s.mu.RUnlock()
-	targetStatus := core.ChargePointStatusFinishing
 	if unavailable {
-		targetStatus = core.ChargePointStatusUnavailable
-	}
-	if err := s.setStatus(targetStatus, core.NoError); err != nil {
-		return err
+		if err := s.setStatus(core.ChargePointStatusUnavailable, core.NoError); err != nil {
+			return err
+		}
+	} else {
+		// Finishing is observable but never terminal in this simulator: there is
+		// no physical unplug action that can advance it.
+		if err := s.setStatus(core.ChargePointStatusFinishing, core.NoError); err != nil {
+			fmt.Printf("[SIM] Finishing status failed after StopTransaction: %v; continuing to Available\n", err)
+		}
+		if err := s.reportAvailableAfterStop(); err != nil {
+			return err
+		}
 	}
 	fmt.Printf("[OCPP] StopTransaction status=%s transactionId=%d meterStop=%.0fWh reason=%s\n", status, transaction, meter, reason)
 	return nil
 }
 
-func (s *simulator) setStatus(status core.ChargePointStatus, code core.ChargePointErrorCode) error {
-	_, err := s.cp.StatusNotification(s.connectorID, code, status, func(request *core.StatusNotificationRequest) {
-		request.Timestamp = types.Now()
+func (s *simulator) sendStartTransaction(connectorID int, idTag string, meterStart int) (*core.StartTransactionConfirmation, error) {
+	if s.startTransactionFunc != nil {
+		return s.startTransactionFunc(connectorID, idTag, meterStart)
+	}
+	return s.cp.StartTransaction(connectorID, idTag, meterStart, types.Now())
+}
+
+func (s *simulator) reportAvailableAfterStop() error {
+	// A completed dummy transaction must not remain in Finishing merely because
+	// the first status request races a transient transport problem. Status
+	// notifications are state reports, so retrying Available cannot duplicate a
+	// transaction or its business side effects.
+	for attempt := 1; ; attempt++ {
+		if err := s.setStatus(core.ChargePointStatusAvailable, core.NoError); err == nil {
+			return nil
+		} else if s.cp == nil || !s.cp.IsConnected() || attempt == 3 {
+			s.mu.Lock()
+			s.status = core.ChargePointStatusAvailable
+			s.errorCode = core.NoError
+			s.mu.Unlock()
+			fmt.Printf("[SIM] Available notification failed after completed stop: %v; local simulator state is Available and startup will announce it on reconnect\n", err)
+			return err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func (s *simulator) sendStopTransaction(meterStop, transactionID int, idTag string, reason core.Reason) (*core.StopTransactionConfirmation, error) {
+	if s.stopTransactionFunc != nil {
+		return s.stopTransactionFunc(meterStop, transactionID, idTag, reason)
+	}
+	return s.cp.StopTransaction(meterStop, types.Now(), transactionID, func(request *core.StopTransactionRequest) {
+		request.IdTag = idTag
+		request.Reason = reason
 	})
+}
+
+func (s *simulator) setStatus(status core.ChargePointStatus, code core.ChargePointErrorCode) error {
+	var err error
+	if s.statusFunc != nil {
+		err = s.statusFunc(status, code)
+	} else {
+		_, err = s.cp.StatusNotification(s.connectorID, code, status, func(request *core.StatusNotificationRequest) {
+			request.Timestamp = types.Now()
+		})
+	}
 	if err != nil {
 		return fmt.Errorf("StatusNotification %s: %w", status, err)
 	}
@@ -646,20 +718,14 @@ func (s *simulator) executePendingRemoteStart() error {
 }
 
 func (s *simulator) executePendingRemoteStop() error {
-	s.mu.RLock()
-	request := s.remoteStop
-	s.mu.RUnlock()
-	if request == nil {
-		return errors.New("no accepted remote stop is pending")
-	}
-	return s.stopTransaction(core.ReasonRemote)
+	return errors.New("accepted remote stops complete automatically")
 }
 
 func (s *simulator) printState() {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	fmt.Printf("connected=%t booted=%t id=%s connector=%d status=%s error=%s plugged=%t\n", s.cp.IsConnected(), s.booted, s.clientID, s.connectorID, s.status, s.errorCode, s.plugged)
-	fmt.Printf("transactionId=%d idTag=%q meter=%.0fWh power=%.3fkW voltage=%.1fV soc=%.1f%% pendingRemoteStart=%t pendingRemoteStop=%t autoRemote=%t\n", s.transaction, s.idTag, s.meterWh, s.powerKW, s.voltage, s.soc, s.remoteStart != nil, s.remoteStop != nil, s.autoRemote)
+	fmt.Printf("transactionId=%d stoppingTransactionId=%d idTag=%q meter=%.0fWh power=%.3fkW voltage=%.1fV soc=%.1f%% pendingRemoteStart=%t autoRemote=%t\n", s.transaction, s.stoppingTransaction, s.idTag, s.meterWh, s.powerKW, s.voltage, s.soc, s.remoteStart != nil, s.autoRemote)
 }
 
 func (s *simulator) hasTransaction() bool {
@@ -767,26 +833,31 @@ func (s *simulator) OnRemoteStartTransaction(request *core.RemoteStartTransactio
 
 func (s *simulator) OnRemoteStopTransaction(request *core.RemoteStopTransactionRequest) (*core.RemoteStopTransactionConfirmation, error) {
 	s.mu.Lock()
-	accepted := s.acceptStop && s.transaction == request.TransactionId
-	if accepted {
-		s.remoteStop = request
+	accepted := s.acceptStop && (s.transaction == request.TransactionId || s.stoppingTransaction == request.TransactionId)
+	startCompletion := accepted && s.stoppingTransaction == 0
+	if startCompletion {
+		s.stoppingTransaction = request.TransactionId
 	}
-	auto := s.autoRemote
 	s.mu.Unlock()
 	status := types.RemoteStartStopStatusRejected
 	if accepted {
 		status = types.RemoteStartStopStatusAccepted
 	}
-	fmt.Printf("[REMOTE] RemoteStopTransaction transactionId=%d response=%s auto=%t\n", request.TransactionId, status, auto)
-	if accepted && auto {
+	fmt.Printf("[REMOTE] RemoteStopTransaction transactionId=%d response=%s completing=%t\n", request.TransactionId, status, startCompletion)
+	if startCompletion {
 		go func() {
-			time.Sleep(100 * time.Millisecond)
-			if err := s.executePendingRemoteStop(); err != nil {
-				fmt.Printf("[SIM] automatic remote stop failed: %v\n", err)
+			if err := s.completeAcceptedRemoteStop(request.TransactionId); err != nil {
+				fmt.Printf("[SIM] accepted remote stop completion failed: %v\n", err)
 			}
 		}()
 	}
 	return core.NewRemoteStopTransactionConfirmation(status), nil
+}
+
+func (s *simulator) completeAcceptedRemoteStop(transactionID int) error {
+	s.opsMu.Lock()
+	defer s.opsMu.Unlock()
+	return s.stopTransactionLocked(core.ReasonRemote, transactionID)
 }
 
 func (s *simulator) OnReset(request *core.ResetRequest) (*core.ResetConfirmation, error) {

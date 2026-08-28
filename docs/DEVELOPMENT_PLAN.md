@@ -20,7 +20,7 @@ Current phase: compatibility verification and operational tooling.
 
 Active feature: none.
 
-Last completed slice: terminal-controlled cross-platform OCPP 1.6J virtual charger.
+Last completed slice: deterministic accepted remote-stop completion for the terminal-controlled virtual charger.
 
 Next approved work: none; select the next slice with the human.
 
@@ -41,6 +41,10 @@ Implemented surfaces:
 - remote command, failure-policy and firmware/diagnostic handling;
 - Windows and Linux builds;
 - focused tests and operator documentation.
+
+Follow-up correction: accepted remote stops now own a single deterministic
+completion path through StopTransaction, Finishing, and Available; focused
+lifecycle tests cover duplicate commands and failed Finishing notification.
 
 Verification: focused tests, `go test ./...`, repository build, Linux cross-build,
 and a loopback memory-store charge flow passed. The canonical PostgreSQL

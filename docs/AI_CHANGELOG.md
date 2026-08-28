@@ -1,5 +1,19 @@
 # AI-assisted changelog
 
+## 2026-08-28 — Deterministic accepted remote-stop completion
+
+- Corrected `cpconsole` so an accepted RemoteStopTransaction owns its lifecycle:
+  one StopTransaction, cleared local transaction state, then Finishing followed
+  immediately by Available.
+- Duplicate matching RemoteStopTransaction requests are accepted while the
+  claimed stop is in progress but cannot emit another StopTransaction.
+- A failed Finishing notification is followed by an Available attempt, so the
+  simulator does not remain indefinitely in Finishing.
+- Updated remote-command guidance and added focused lifecycle tests.
+
+Compatibility: this changes only the dummy charger client. It does not alter
+HAL or CMS source, data, service state, or contracts.
+
 ## 2026-08-03 — Terminal-controlled virtual charger
 
 - Added `cmd/cpconsole`, a standalone configurable OCPP 1.6J virtual EV charger.
